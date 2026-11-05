@@ -67,3 +67,4 @@ proposing something that contradicts it. When a new decision is made, add an ADR
 a summary line here.
 
 * [0000](docs/decisions/0000-template.md): A minimal MADR (Markdown Architecture Decision Record) template to use.
+* [0001](docs/decisions/0001-tech-stack.md): Rust core (axum, cargo-dist) with tree-sitter analysis via WASM component plugins, a Vite + Svelte 5 frontend with Cytoscape.js/elkjs, server-side highlighting, and the `git` CLI as the only external requirement.
