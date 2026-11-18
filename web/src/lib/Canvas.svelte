@@ -10,15 +10,31 @@
   import '@xyflow/svelte/dist/style.css';
   import FileView from './FileView.svelte';
   import FolderView from './FolderView.svelte';
-  import type { Box } from './layout';
+  import type { FileNode } from './api';
+  import { FILE_WIDTH, type Box, type FileBox } from './layout';
 
-  let { boxes, title }: { boxes: Box[]; title: string } = $props();
+  let {
+    boxes,
+    title,
+    onopenfile,
+  }: {
+    boxes: Box[];
+    title: string;
+    onopenfile: (file: FileNode) => void;
+  } = $props();
+
+  /** A file's diff opens once the file is drawn this much of the screen's width. */
+  const FILL = 0.7;
 
   const nodeTypes: NodeTypes = { folder: FolderView, file: FileView };
   const flow = useSvelteFlow();
 
-  const fitPadding = 0.08;
+  // A number would be pixels.
+  const fitPadding = '4%';
   let viewport = $state<Viewport>({ x: 0, y: 0, zoom: 1 });
+
+  let width = $state(0);
+  let height = $state(0);
 
   async function oninit() {
     await flow.fitView({ padding: fitPadding });
@@ -72,6 +88,44 @@
     })),
   );
 
+  const files = $derived(
+    boxes.filter((box): box is FileBox => box.kind === 'file'),
+  );
+
+  // The file whose diff was last opened by zooming in. It does not open again until the user zooms away from it,
+  // so that closing the diff returns to the canvas, unchanged.
+  let opened: string | undefined;
+
+  function onmove(_: unknown, moved: Viewport) {
+    const zoomedIn = moved.zoom > viewport.zoom;
+    viewport = moved;
+    const file = fillingFile(moved);
+    if (!file) {
+      opened = undefined;
+    } else if (zoomedIn && file.id !== opened) {
+      // Only zooming in opens a diff; panning across files that fill the screen does not.
+      opened = file.id;
+      onopenfile(file.file);
+    }
+  }
+
+  /** The file at the center of the screen, if it is zoomed in far enough to fill most of the screen. */
+  function fillingFile({ x, y, zoom }: Viewport): FileBox | undefined {
+    if (width === 0 || FILE_WIDTH * zoom < FILL * width) {
+      return undefined;
+    }
+    const centerX = (width / 2 - x) / zoom;
+    const centerY = (height / 2 - y) / zoom;
+    return files.find(
+      (file) =>
+        file.revealZoom <= zoom &&
+        centerX >= file.absX &&
+        centerX <= file.absX + file.width &&
+        centerY >= file.absY &&
+        centerY <= file.absY + file.height,
+    );
+  }
+
   function onnodeclick({
     node,
     event,
@@ -84,7 +138,9 @@
       return;
     }
     const box = node.data.box as Box;
-    if (box.kind === 'folder') {
+    if (box.kind === 'file') {
+      onopenfile(box.file);
+    } else {
       void flow.fitBounds(
         { x: box.absX, y: box.absY, width: box.width, height: box.height },
         { duration: 400, padding: fitPadding },
@@ -93,13 +149,13 @@
   }
 </script>
 
-<div class="canvas">
+<div class="canvas" bind:clientWidth={width} bind:clientHeight={height}>
   <SvelteFlow
     {nodes}
     edges={[]}
     {nodeTypes}
     {oninit}
-    onmove={(_, moved) => (viewport = moved)}
+    {onmove}
     {onnodeclick}
     minZoom={0.0005}
     maxZoom={12}
