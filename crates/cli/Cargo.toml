@@ -1,0 +1,22 @@
+[package]
+name = "vugent"
+description = "See what your agent is doing: a diagram of uncommitted changes, with diffs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "vugent"
+path = "src/main.rs"
+
+[dependencies]
+vugent-git.workspace = true
+vugent-server.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
