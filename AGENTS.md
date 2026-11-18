@@ -67,5 +67,6 @@ proposing something that contradicts it. When a new decision is made, add an ADR
 a summary line here.
 
 * [0000](docs/decisions/0000-template.md): A minimal MADR (Markdown Architecture Decision Record) template to use.
-* [0001](docs/decisions/0001-tech-stack.md): Rust core (axum, cargo-dist) with tree-sitter analysis via WASM component plugins, a Vite + Svelte 5 frontend with Cytoscape.js/elkjs, server-side highlighting, and the `git` CLI as the only external requirement.
+* [0001](docs/decisions/0001-tech-stack.md): Rust core (axum, cargo-dist) with tree-sitter analysis via WASM component plugins, a Vite + Svelte 5 frontend with elkjs (diagram library superseded by 0003), server-side highlighting, and the `git` CLI as the only external requirement.
 * [0002](docs/decisions/0002-review-uncommitted-changes.md): v0.1.0 reviews all uncommitted changes, untracked files included, against HEAD; a review is modeled as a (base, target) pair so that branch and single-commit modes can be added later.
+* [0003](docs/decisions/0003-semantic-zoom-canvas.md): The UI is a Svelte Flow canvas (replacing Cytoscape.js) with one elkjs layout of the folder tree, where folders open as they grow on screen and a file's diff opens in a full-screen panel closed with Esc.
