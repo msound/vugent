@@ -1,13 +1,19 @@
 //! The HTTP server behind vugent's browser UI.
 
-use std::borrow::Cow;
+mod tree;
 
-use axum::Router;
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use axum::extract::{Query, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use axum::{Json, Router};
 use rust_embed::RustEmbed;
+use serde::Deserialize;
 use tokio::net::TcpListener;
+use vugent_git::Review;
 
 /// The built frontend, which `npm run build` in `web/` writes to this crate's `frontend/` folder. In debug builds
 /// rust-embed reads it from disk at run time; in release builds it is compiled in. It may be missing when the frontend
@@ -17,11 +23,14 @@ use tokio::net::TcpListener;
 #[allow_missing = true]
 struct Frontend;
 
-/// Builds the application's routes.
-pub fn router() -> Router {
+/// Builds the application's routes, serving `review`.
+pub fn router(review: Review) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/tree", get(tree))
+        .route("/api/diff", get(diff))
         .fallback(frontend)
+        .with_state(Arc::new(review))
 }
 
 /// Serves `router` on `listener` until Ctrl-C is pressed.
@@ -33,6 +42,61 @@ pub async fn serve(listener: TcpListener, router: Router) -> std::io::Result<()>
 
 async fn health() -> &'static str {
     "ok"
+}
+
+/// `GET /api/tree`: every folder and file of the review, with how each file changed.
+async fn tree(State(review): State<Arc<Review>>) -> Response {
+    let result = tokio::task::spawn_blocking(move || {
+        let files = review.files()?;
+        let name = review
+            .dir()
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(tree::build(&name, files))
+    })
+    .await;
+    json_response(result)
+}
+
+#[derive(Debug, Deserialize)]
+struct DiffQuery {
+    path: String,
+}
+
+/// `GET /api/diff?path=<path>`: the diff of one file of the review.
+async fn diff(State(review): State<Arc<Review>>, Query(query): Query<DiffQuery>) -> Response {
+    let result = tokio::task::spawn_blocking(move || review.diff(&query.path)).await;
+    json_response(result)
+}
+
+/// Answers with `result` as JSON, or with the error as plain text.
+fn json_response<T: serde::Serialize>(
+    result: Result<Result<T, vugent_git::Error>, tokio::task::JoinError>,
+) -> Response {
+    let error = match result {
+        Ok(Ok(value)) => {
+            return ([(header::CACHE_CONTROL, "no-store")], Json(value)).into_response();
+        }
+        Ok(Err(error)) => error,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let status = match error {
+        vugent_git::Error::NotFound(_) => StatusCode::NOT_FOUND,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, error_message(&error)).into_response()
+}
+
+/// The error with its causes, such as "cannot read x: permission denied".
+fn error_message(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    message
 }
 
 async fn frontend(uri: Uri) -> Response {
@@ -107,7 +171,11 @@ mod tests {
     use tower::ServiceExt;
 
     async fn get(path: &str) -> Response {
-        router()
+        get_in(std::env::temp_dir(), path).await
+    }
+
+    async fn get_in(dir: impl Into<std::path::PathBuf>, path: &str) -> Response {
+        router(Review::new(dir))
             .oneshot(Request::get(path).body(Body::empty()).unwrap())
             .await
             .unwrap()
@@ -143,6 +211,90 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(body(response).await, b"ok");
+    }
+
+    /// Runs git in `dir` for test setup, isolated from the user's git configuration.
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// A repository with a committed `src/a.txt` that has since been changed.
+    fn repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("a.txt"), "one\n").unwrap();
+        git(tmp.path(), &["init", "--quiet"]);
+        git(tmp.path(), &["add", "."]);
+        git(tmp.path(), &["commit", "--quiet", "-m", "init"]);
+        std::fs::write(src.join("a.txt"), "two\n").unwrap();
+        tmp
+    }
+
+    async fn json(response: Response) -> serde_json::Value {
+        serde_json::from_slice(&body(response).await).unwrap()
+    }
+
+    #[tokio::test]
+    async fn tree_lists_the_review() {
+        let tmp = repo();
+
+        let response = get_in(tmp.path(), "/api/tree").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(header_of(&response, header::CACHE_CONTROL), "no-store");
+        let tree = json(response).await;
+        let file = &tree["children"][0]["children"][0];
+        assert_eq!(file["path"], "src/a.txt");
+        assert_eq!(file["status"], "modified");
+    }
+
+    #[tokio::test]
+    async fn diff_returns_hunks() {
+        let tmp = repo();
+
+        let response = get_in(tmp.path(), "/api/diff?path=src%2Fa.txt").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let diff = json(response).await;
+        let lines = &diff["hunks"][0]["lines"];
+        assert_eq!(lines[0]["kind"], "removed");
+        assert_eq!(lines[0]["text"], "one");
+        assert_eq!(lines[1]["kind"], "added");
+        assert_eq!(lines[1]["newLine"], 1);
+    }
+
+    #[tokio::test]
+    async fn diff_of_an_unknown_path_is_not_found() {
+        let tmp = repo();
+
+        let response = get_in(tmp.path(), "/api/diff?path=nope.txt").await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn diff_without_a_path_is_a_bad_request() {
+        assert_eq!(get("/api/diff").await.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn tree_outside_a_repository_is_a_server_error() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let response = get_in(tmp.path(), "/api/tree").await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]

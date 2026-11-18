@@ -10,11 +10,15 @@ repository.workspace = true
 include = ["/src/", "/build.rs", "/frontend/"]
 
 [dependencies]
+vugent-git.workspace = true
 axum.workspace = true
 rust-embed.workspace = true
+serde.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
 tower.workspace = true
 
 [lints]

@@ -52,7 +52,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    vugent_server::serve(listener, vugent_server::router()).await?;
+    let review = vugent_git::Review::new(path);
+    vugent_server::serve(listener, vugent_server::router(review)).await?;
     Ok(())
 }
 
