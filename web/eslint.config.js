@@ -7,7 +7,6 @@ import { defineConfig } from 'eslint/config';
 import svelteConfig from './svelte.config.js';
 
 export default defineConfig(
-  { ignores: ['dist/'] },
   js.configs.recommended,
   ...ts.configs.recommended,
   ...svelte.configs.recommended,

@@ -9,10 +9,11 @@ use axum::routing::get;
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
 
-/// The built frontend (`web/dist`). In debug builds rust-embed reads it from disk at run time; in release builds it
-/// is compiled in. It may be missing when the frontend has not been built.
+/// The built frontend, which `npm run build` in `web/` writes to this crate's `frontend/` folder. In debug builds
+/// rust-embed reads it from disk at run time; in release builds it is compiled in. It may be missing when the frontend
+/// has not been built (see `build.rs`).
 #[derive(RustEmbed)]
-#[folder = "../../web/dist/"]
+#[folder = "frontend/"]
 #[allow_missing = true]
 struct Frontend;
 

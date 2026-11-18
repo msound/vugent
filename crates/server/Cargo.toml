@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# frontend/ is built by `npm run build` in web/ and is gitignored, so it is listed here to be packaged.
+include = ["/src/", "/build.rs", "/frontend/"]
 
 [dependencies]
 axum.workspace = true
