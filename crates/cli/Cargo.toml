@@ -17,6 +17,7 @@ vugent-server.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true
+webbrowser.workspace = true
 
 [lints]
 workspace = true

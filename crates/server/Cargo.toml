@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 axum.workspace = true
+rust-embed.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

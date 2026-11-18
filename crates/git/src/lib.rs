@@ -8,11 +8,26 @@ use std::process::Command;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The `git` executable could not be started, usually because it is not on `PATH`.
-    #[error("could not run git (is it installed and on PATH?): {0}")]
+    #[error("could not run git (is it installed and on PATH?)")]
     Spawn(#[source] io::Error),
     /// git ran but exited with a failure.
     #[error("git {args} failed: {stderr}")]
     Failed { args: String, stderr: String },
+}
+
+/// Returns the output of `git --version`, such as `git version 2.47.1`. Use it to check that git is installed.
+pub fn version() -> Result<String, Error> {
+    let output = Command::new("git")
+        .arg("--version")
+        .output()
+        .map_err(Error::Spawn)?;
+    if !output.status.success() {
+        return Err(Error::Failed {
+            args: "--version".to_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 /// Returns the root of the working tree that contains `path`.
@@ -50,6 +65,13 @@ mod tests {
             .status()
             .expect("git init");
         assert!(status.success());
+    }
+
+    #[test]
+    fn version_reports_git_version() {
+        let version = version().unwrap();
+
+        assert!(version.starts_with("git version "), "got {version:?}");
     }
 
     #[test]
