@@ -27,3 +27,16 @@ cd web && npm install && npm run dev
 
 Set `VUGENT_SERVER` to proxy to a different address. Before committing, run `npm run check` and `npm run lint`
 (`npm run format` fixes formatting).
+
+## Releasing
+
+Pushing a version tag such as `v0.1.0` runs the cargo-dist release workflow (`.github/workflows/release.yml`), which
+builds the frontend, then the binaries and shell/PowerShell installers, and attaches them to a GitHub Release. Its
+configuration is in `dist-workspace.toml` and `.github/build-setup.yml`; run `dist generate` after changing them.
+
+To publish to crates.io, build the frontend first so that it is packaged with `vugent-server`:
+
+```sh
+cd web && npm ci && npm run build && cd ..
+VUGENT_REQUIRE_FRONTEND=1 cargo publish --workspace
+```

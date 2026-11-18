@@ -1,0 +1,16 @@
+# Steps that dist inserts into the release workflow before each build (see github-build-setup in
+# dist-workspace.toml). They build the frontend that vugent embeds, and make the build fail if it is missing so a
+# release never ships without the UI.
+- name: Install Node
+  uses: actions/setup-node@v7
+  with:
+    node-version: 24
+    cache: npm
+    cache-dependency-path: web/package-lock.json
+- name: Build the frontend
+  shell: bash
+  # dist does not pass working-directory through to the release workflow.
+  run: cd web && npm ci && npm run build
+- name: Require the frontend in the build
+  shell: bash
+  run: echo "VUGENT_REQUIRE_FRONTEND=1" >> "$GITHUB_ENV"
