@@ -59,7 +59,7 @@ The decision in detail:
 |---|---|
 | Core language | Rust, organized as a cargo workspace (cli, server, core, git, analysis, watch, highlight, plugin host, first-party language crates). |
 | CLI and server | clap; axum on tokio; Server-Sent Events for pushing live updates to the browser. |
-| Distribution | cargo-dist: GitHub Releases, Homebrew tap, shell/PowerShell installers. Also published to crates.io; the published crate includes the prebuilt frontend so `cargo install vugent` does not need Node. |
+| Distribution | cargo-dist: GitHub Releases with shell/PowerShell installers (no Homebrew tap, which would need a separate tap repository and token to maintain). Also published to crates.io; the published crate includes the prebuilt frontend so `cargo install vugent` does not need Node. |
 | Frontend | Vite + Svelte 5 + TypeScript. Built in CI, embedded into the binary with rust-embed. Built assets are not committed. In development, the Vite dev server proxies `/api` to the Rust server. |
 | Block diagram | ~~Cytoscape.js (canvas rendering, compound nodes, scales to large graphs)~~ Svelte Flow, superseded by [ADR 0003](0003-semantic-zoom-canvas.md), with elkjs layout running in a Web Worker. Layout happens in the browser; the server sends graph data only. |
 | Diffs and highlighting | Diffs computed server-side via git. Syntax highlighting server-side with tree-sitter-highlight, emitting HTML with CSS classes; themes (light/dark) are handled in CSS. Languages without highlight queries fall back to plain text. |
