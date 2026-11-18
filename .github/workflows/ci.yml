@@ -18,8 +18,18 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
+      # Test against the embedded UI, failing the build if it is missing.
+      VUGENT_REQUIRE_FRONTEND: 1
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the frontend
+        working-directory: web
+        run: npm ci && npm run build
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
