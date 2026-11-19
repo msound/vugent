@@ -57,6 +57,8 @@ tests must pass. Use `Refs: #n` in the footer of intermediate commits, and `Clos
 
 ## Notes
 
+Releases are made with cocogitto (`cog bump --auto`), configured in `cog.toml`. Its `chore(version): vX.Y.Z`
+release commit is the one allowed exception to the no-scope rule; never add scopes to other commits.
 
 
 ## Architecture decisions

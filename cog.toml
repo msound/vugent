@@ -1,0 +1,25 @@
+# Cocogitto release configuration. Release with: cog bump --auto
+# Requires cargo-edit for `cargo set-version`.
+
+tag_prefix = "v"
+branch_whitelist = ["main"]
+ignore_merge_commits = true
+
+pre_bump_hooks = [
+  "cargo set-version {{version}}",
+  "git add :/Cargo.lock",
+]
+
+# Pushing the tag triggers the cargo-dist release workflow.
+post_bump_hooks = [
+  "git push",
+  "git push origin v{{version}}",
+]
+
+[changelog]
+path = "CHANGELOG.md"
+template = "remote"
+remote = "github.com"
+owner = "msound"
+repository = "vugent"
+authors = [{ signature = "Mani Soundararajan", username = "msound" }]
