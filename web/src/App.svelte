@@ -9,6 +9,7 @@
     type Rev,
   } from './lib/api';
   import Canvas from './lib/Canvas.svelte';
+  import DetailPage from './lib/DetailPage.svelte';
   import DiffPanel from './lib/DiffPanel.svelte';
   import ReviewHeader from './lib/ReviewHeader.svelte';
   import Sidebar from './lib/Sidebar.svelte';
@@ -26,6 +27,7 @@
 
   let rows = $state<Row[] | undefined>();
   let base = $state<Base | null>(null);
+  let github = $state<string | null>(null);
   let rev = $state<Rev | undefined>();
   let historyError = $state<string | undefined>();
 
@@ -38,6 +40,29 @@
 
   // The canvas stays mounted under the diff panel, so closing the panel returns to exactly the same view.
   let openFile = $state<FileNode | undefined>();
+  // The detail page of ADR 0007. It stays open when a row is picked from it, and a diff opens over it.
+  let detailOpen = $state(false);
+
+  function onkeydown(event: KeyboardEvent) {
+    if (
+      event.key !== 'Enter' ||
+      detailOpen ||
+      openFile !== undefined ||
+      selectedRow === undefined ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, select, [contenteditable]')) {
+      return;
+    }
+    event.preventDefault();
+    detailOpen = true;
+  }
 
   /** Fetches the sidebar's rows again, keeping the selection while its row is still listed. */
   async function refresh(opened: boolean) {
@@ -46,6 +71,7 @@
       historyError = undefined;
       rows = rowsOf(history);
       base = history.base;
+      github = history.github;
       const wanted = opened ? requested : rev;
       rev = pick(rows, wanted, opened);
     } catch (failure) {
@@ -124,18 +150,23 @@
   });
 </script>
 
-<svelte:window onfocus={() => void refresh(false)} />
+<svelte:window onfocus={() => void refresh(false)} {onkeydown} />
 
 <Sidebar
   {rows}
   selected={rev}
   {loading}
-  keys={openFile === undefined}
+  keys={openFile === undefined && !detailOpen}
   onselect={(next) => (rev = next)}
 />
 
 {#if selectedRow}
-  <ReviewHeader row={selectedRow} {base} {summary} />
+  <ReviewHeader
+    row={selectedRow}
+    {base}
+    {summary}
+    onopen={() => (detailOpen = true)}
+  />
 {/if}
 
 {#if historyError}
@@ -155,6 +186,19 @@
         />
       </SvelteFlowProvider>
     {/key}
+    {#if detailOpen && selectedRow && rows}
+      <DetailPage
+        row={selectedRow}
+        {rows}
+        {base}
+        {github}
+        {summary}
+        keys={openFile === undefined}
+        onopenfile={(file) => (openFile = file)}
+        onselect={(next) => (rev = next)}
+        onclose={() => (detailOpen = false)}
+      />
+    {/if}
     {#if openFile}
       <DiffPanel
         file={openFile}

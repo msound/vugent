@@ -57,7 +57,8 @@
   $effect(() => () => elastic.destroy());
 
   function onkeydown(event: KeyboardEvent) {
-    if (keys && event.key === 'Escape') {
+    // A page open over this one handles Esc first and prevents its default.
+    if (keys && event.key === 'Escape' && !event.defaultPrevented) {
       event.preventDefault();
       onclose();
     }
