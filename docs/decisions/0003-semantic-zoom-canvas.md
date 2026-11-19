@@ -58,7 +58,7 @@ What the user sees in v0.1.0:
 |---|---|
 | Starting view | The folders and files directly inside the service root, fitted to the screen. Each folder is a box showing its name. |
 | Opening a folder | A folder box shows its contents, files as smaller boxes and subfolders as boxes, once it is drawn large enough on screen. This repeats at every depth, so nested folders open one after another as the user zooms in. |
-| Opening a diff | Double-clicking a file, or zooming in until the file fills most of the screen, opens its diff in a full-screen panel. The panel scrolls like a normal page. Esc closes it and returns to the canvas exactly where the user left it. |
+| Opening a diff | Double-clicking a file, or zooming in until the file fills most of the screen, opens its diff in a full-screen panel. The panel scrolls like a normal page. Esc closes it and returns to the canvas exactly where the user left it. So does scrolling on past the end of the diff (#21): an elastic arc rises from the bottom of the screen and snaps, closing the panel, once it is pulled far enough. Only a gesture that starts at the end pulls the arc, so a fast scroll through the diff cannot close it by accident. |
 | Input | The scroll wheel, a two-finger scroll or a pinch zooms. Dragging pans. Double-clicking a folder zooms to fit it. |
 | Colors | Green for added, orange for modified, red for deleted, white for unchanged. A folder is orange if anything inside it changed. Issue #4 may refine this. |
 | Layout | elkjs lays out the whole tree once, with every folder sized to hold its contents. Because there are no edges, boxes are packed with ELK's rectangle packing algorithm. |
@@ -78,10 +78,13 @@ Left for later ADRs or issues:
   added without changing the canvas.
 * Good, because boxes never move when the user zooms, which keeps the user oriented.
 * Good, because the diff reads like a normal page and Esc always leads back to the same spot on the canvas.
+* Good, because scrolling past the end of a diff is the same wheel direction that zooms out on the canvas, so the
+  user leaves a diff with the reverse of the gesture that opened it, and the rest of that gesture zooms the canvas
+  out.
 * Good, because the frontend stays Vite + Svelte 5 and the canvas is styled with the same CSS as the rest of the UI.
 * Bad, because Svelte Flow draws nodes as DOM elements, which becomes slow with many thousands of nodes. One
   service's folders and files are well within its limits, and Svelte Flow can skip nodes that are off screen.
   Large monorepos may need this decision revisited.
 * Bad, because opening a diff by zooming in is a change of mode that some users may not expect. Double-click is
-  offered as the obvious alternative.
+  offered as the obvious alternative, and the elastic arc shows plainly that scrolling on leaves the diff.
 * Bad, because a very large folder makes its siblings look small at the starting zoom level.
