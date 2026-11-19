@@ -40,7 +40,7 @@ pub struct Signature {
 }
 
 /// The format of `git show`: fields separated by NUL, the body last because it spans lines.
-const FORMAT: &str = "--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%(trailers:only,unfold)%x00%b";
+const FORMAT: &str = "--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%b";
 
 impl Review {
     /// Reads the commit `sha`. Fails with [`Error::NotFound`] when there is no such commit.
@@ -57,7 +57,7 @@ impl Review {
             &["show", "-s", "--no-show-signature", FORMAT, &sha, "--"],
         )?;
         let out = String::from_utf8_lossy(&out);
-        let mut fields = out.splitn(11, '\0');
+        let mut fields = out.splitn(10, '\0');
         let mut next = || fields.next().unwrap_or_default().to_owned();
         let (sha, short_sha, subject) = (next(), next(), next());
         let author = Signature {
@@ -70,8 +70,7 @@ impl Review {
             email: next(),
             date: next(),
         };
-        let trailers = parse_trailers(&next());
-        let body = strip_trailers(&next(), !trailers.is_empty());
+        let (body, trailers) = split_trailers(&next());
         Ok(CommitDetails {
             sha,
             short_sha,
@@ -91,30 +90,65 @@ impl Review {
     }
 }
 
-/// Reads the `Key: value` lines that `%(trailers:only,unfold)` prints.
-fn parse_trailers(text: &str) -> Vec<Trailer> {
-    text.lines()
-        .filter_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            Some(Trailer {
-                key: key.trim().to_owned(),
-                value: value.trim().to_owned(),
-            })
-        })
-        .collect()
+/// Splits the trailers off the end of a commit's body. git only finds trailers in the last paragraph, but footers
+/// are often written as several paragraphs, such as `Closes: #25`, a blank line and `Co-Authored-By: …`, so every
+/// paragraph at the end made only of trailers counts. Lines that start with whitespace continue the trailer above.
+fn split_trailers(body: &str) -> (String, Vec<Trailer>) {
+    let mut paragraphs: Vec<Vec<&str>> = vec![Vec::new()];
+    for line in body.lines() {
+        if line.trim().is_empty() {
+            paragraphs.push(Vec::new());
+        } else if let Some(paragraph) = paragraphs.last_mut() {
+            paragraph.push(line);
+        }
+    }
+    paragraphs.retain(|paragraph| !paragraph.is_empty());
+
+    let mut keep = paragraphs.len();
+    while keep > 0 && is_trailer_block(&paragraphs[keep - 1]) {
+        keep -= 1;
+    }
+    let mut trailers: Vec<Trailer> = Vec::new();
+    for line in paragraphs[keep..].iter().flatten() {
+        if line.starts_with([' ', '\t']) {
+            if let Some(last) = trailers.last_mut() {
+                last.value.push(' ');
+                last.value.push_str(line.trim());
+            }
+        } else if let Some((key, value)) = trailer(line) {
+            trailers.push(Trailer {
+                key: key.to_owned(),
+                value: value.to_owned(),
+            });
+        }
+    }
+    let text = paragraphs[..keep]
+        .iter()
+        .map(|paragraph| paragraph.join("\n"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    (text, trailers)
 }
 
-/// The body without its trailers, which git only finds in the last paragraph.
-fn strip_trailers(body: &str, has_trailers: bool) -> String {
-    let body = body.trim_end();
-    if !has_trailers {
-        return body.to_owned();
-    }
-    match body.rfind("\n\n") {
-        Some(end) => body[..end].trim_end().to_owned(),
-        // The trailers are the whole body.
-        None => String::new(),
-    }
+/// Whether every line of `paragraph` is a trailer or continues one.
+fn is_trailer_block(paragraph: &[&str]) -> bool {
+    paragraph
+        .first()
+        .is_some_and(|first| trailer(first).is_some())
+        && paragraph
+            .iter()
+            .all(|line| line.starts_with([' ', '\t']) || trailer(line).is_some())
+}
+
+/// The key and value of a trailer line such as `Co-Authored-By: Name <email>`.
+fn trailer(line: &str) -> Option<(&str, &str)> {
+    let (key, value) = line.split_once(':')?;
+    let value = value.trim();
+    let valid = !key.is_empty()
+        && !value.is_empty()
+        && key.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    valid.then_some((key, value))
 }
 
 /// The web address of a GitHub repository from a remote URL in any of the forms git accepts.
@@ -192,6 +226,47 @@ mod tests {
         assert_eq!(details.author.email, "test@example.com");
         assert!(details.author.date.contains('T'), "{}", details.author.date);
         assert_eq!(details.committer, details.author);
+    }
+
+    #[test]
+    fn footers_in_several_paragraphs_are_all_trailers() {
+        let (tmp, sha) = repo_with(
+            "feat: x\n\nBody.\n\nRefs: #25\n\nCo-Authored-By: A <a@example.com>\n  and friends\n",
+        );
+
+        let details = Review::new(tmp.path()).commit_details(&sha).unwrap();
+
+        assert_eq!(details.body, "Body.");
+        let trailers: Vec<_> = details
+            .trailers
+            .iter()
+            .map(|trailer| (trailer.key.as_str(), trailer.value.as_str()))
+            .collect();
+        assert_eq!(
+            trailers,
+            [
+                ("Refs", "#25"),
+                ("Co-Authored-By", "A <a@example.com> and friends")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_paragraph_with_prose_is_not_a_trailer_block() {
+        assert_eq!(
+            split_trailers("Body.\n\nNote: this matters.\nIt really does.\n\nCloses: #1"),
+            (
+                "Body.\n\nNote: this matters.\nIt really does.".to_owned(),
+                vec![Trailer {
+                    key: "Closes".to_owned(),
+                    value: "#1".to_owned()
+                }]
+            )
+        );
+        assert_eq!(
+            split_trailers("See https://example.com: it explains.").1,
+            []
+        );
     }
 
     #[test]

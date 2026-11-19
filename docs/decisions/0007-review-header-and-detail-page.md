@@ -71,7 +71,9 @@ The line counts are those of the review's tree: lines added and removed in every
 * **A commit** shows its subject, the rest of the message as plain text in a readable width, the full SHA with a copy
   button, the author and author date, and the committer and commit date only when they differ from the author's.
   Trailers, such as `Co-Authored-By`, `Closes` and `Refs`, are shown as chips; issue references such as `#25` link to
-  the issue when `origin` is on GitHub.
+  the issue when `origin` is on GitHub. git only reads trailers from the last paragraph, but footers are often
+  written as several, such as `Closes: #25`, a blank line and `Co-Authored-By: …`, so every paragraph at the end of
+  the message made only of `Key: value` lines counts as trailers.
 * **The branch** shows the commits of the branch; clicking one selects its row.
 * **Every page** lists the changed files with their line counts. Clicking one opens its diff over the page; closing
   the diff returns to the page.
