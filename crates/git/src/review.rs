@@ -1,7 +1,7 @@
 //! The review from ADR 0002: every uncommitted change in a folder, untracked files included, compared against `HEAD`.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -39,6 +39,9 @@ pub struct FileEntry {
     pub submodule: bool,
     /// Not tracked by git yet.
     pub untracked: bool,
+    /// Lines in the working tree, counted the way git does: 0 for a deleted file, and 1 for a binary file, a symbolic
+    /// link or a submodule.
+    pub lines: u32,
 }
 
 /// git looks for a NUL byte in this many leading bytes to decide whether a file is binary.
@@ -137,6 +140,7 @@ impl Review {
                 Some(repo) => FileEntry {
                     status: Status::Added,
                     untracked: true,
+                    lines: 1,
                     ..unchanged(repo, true)
                 },
                 None => {
@@ -146,11 +150,26 @@ impl Review {
                         added: lines,
                         binary,
                         untracked: true,
+                        lines: if binary { 1 } else { lines },
                         ..unchanged(path, false)
                     }
                 }
             };
             files.insert(entry.path.clone(), entry);
+        }
+
+        for entry in files.values_mut().filter(|entry| !entry.untracked) {
+            entry.lines = match entry.status {
+                Status::Deleted => 0,
+                _ if entry.submodule || entry.binary => 1,
+                _ => match count_lines(&self.dir.join(&entry.path)) {
+                    Ok((_, true)) => 1,
+                    Ok((lines, false)) => lines,
+                    // Added to the index and then deleted: git shows no change against HEAD.
+                    Err(Error::Read { source, .. }) if source.kind() == ErrorKind::NotFound => 0,
+                    Err(err) => return Err(err),
+                },
+            };
         }
 
         Ok(files.into_values().collect())
@@ -290,6 +309,7 @@ fn unchanged(path: &str, submodule: bool) -> FileEntry {
         old_path: None,
         submodule,
         untracked: false,
+        lines: 0,
     }
 }
 
@@ -317,7 +337,7 @@ fn read(path: &Path) -> Result<Vec<u8>, Error> {
     })
 }
 
-/// Counts the lines of an untracked file the way `git diff` would, and tells whether it is binary.
+/// Counts the lines of a working tree file the way `git diff` would, and tells whether it is binary.
 fn count_lines(path: &Path) -> Result<(u32, bool), Error> {
     if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
         return Ok((1, false));
@@ -428,6 +448,29 @@ mod tests {
     }
 
     #[test]
+    fn counts_the_lines_of_every_file_in_the_working_tree() {
+        let tmp = repo();
+        let dir = tmp.path();
+        write(dir, "a.txt", b"one\ntwo");
+        std::fs::remove_file(dir.join("src/lib.rs")).unwrap();
+        write(dir, "new.txt", b"x\ny\nz\n");
+        write(dir, "image.bin", b"\0\x01\x02");
+        write(dir, "gone.txt", b"g\n");
+        git(dir, &["add", "gone.txt"]);
+        std::fs::remove_file(dir.join("gone.txt")).unwrap();
+
+        let files = Review::new(dir).files().unwrap();
+
+        let lines = |path| find(&files, path).lines;
+        assert_eq!(lines("a.txt"), 2);
+        assert_eq!(lines("src/lib.rs"), 0);
+        assert_eq!(lines("src/old.rs"), 3);
+        assert_eq!(lines("new.txt"), 3);
+        assert_eq!(lines("image.bin"), 1);
+        assert_eq!(lines("gone.txt"), 0);
+    }
+
+    #[test]
     fn binary_tracked_files_have_no_line_counts() {
         let tmp = repo();
         write(tmp.path(), "blob.bin", b"\0a");
@@ -509,6 +552,7 @@ mod tests {
         assert_eq!(lib.status, Status::Added);
         let nested = find(&files, "nested");
         assert!(nested.submodule && nested.untracked);
+        assert_eq!((lib.lines, nested.lines), (1, 1));
         assert!(!files.iter().any(|entry| entry.path.starts_with("nested/")));
         let diff = review.diff("vendor/lib").unwrap();
         assert!(diff.submodule && diff.hunks.is_empty());
