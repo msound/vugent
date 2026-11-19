@@ -96,7 +96,9 @@ fn parse_rev(rev: Option<&str>) -> Result<Rev, String> {
     match rev {
         None => Ok(Rev::WorkTree),
         Some(rev) => Rev::parse(rev).ok_or_else(|| {
-            format!("{rev:?} is not a review: use worktree, index, branch or a commit SHA")
+            format!(
+                "{rev:?} is not a review: use worktree, index, unstaged, branch or a commit SHA"
+            )
         }),
     }
 }
@@ -315,6 +317,7 @@ mod tests {
         let history = json(response).await;
         assert_eq!(history["uncommitted"], true);
         assert_eq!(history["staged"], false);
+        assert_eq!(history["unstaged"], true);
         assert_eq!(history["commits"][0]["subject"], "init");
         assert!(history["commits"][0]["shortSha"].is_string());
     }
@@ -347,6 +350,17 @@ mod tests {
         let tree = json(get_in(tmp.path(), "/api/tree?rev=index").await).await;
 
         assert_eq!(tree["children"][0]["children"][0]["status"], "unchanged");
+    }
+
+    #[tokio::test]
+    async fn unstaged_shows_changes_since_the_index() {
+        let tmp = repo();
+
+        let tree = json(get_in(tmp.path(), "/api/tree?rev=unstaged").await).await;
+        let diff = json(get_in(tmp.path(), "/api/diff?path=src%2Fa.txt&rev=unstaged").await).await;
+
+        assert_eq!(tree["children"][0]["children"][0]["status"], "modified");
+        assert_eq!(diff["hunks"][0]["lines"][0]["text"], "one");
     }
 
     #[tokio::test]

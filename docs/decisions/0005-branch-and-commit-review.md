@@ -38,8 +38,9 @@ What a commit shows on the canvas:
 
 ## Decision Outcome
 
-Chosen options: **a list in the UI**, **"Staged changes" next to "Uncommitted changes"**, **the merge-base against
-the working tree**, and **the file tree as it was at that commit**.
+Chosen options: **a list in the UI**, ~~**"Staged changes" next to "Uncommitted changes"**~~ (superseded by
+[ADR 0006](0006-staged-and-unstaged-changes.md): "Staged" and "Unstaged" changes while something is staged), **the
+merge-base against the working tree**, and **the file tree as it was at that commit**.
 
 A list in the UI is chosen because stepping through an agent's commits one by one, without restarting vugent, is
 the point of the feature. Uncommitted plus staged is chosen because "everything the agent did" stays the default

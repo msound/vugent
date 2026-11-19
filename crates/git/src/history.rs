@@ -1,4 +1,5 @@
-//! The reviews the sidebar of ADR 0005 offers: the branch, uncommitted and staged changes, and recent commits.
+//! The reviews the sidebar of ADR 0005 and ADR 0006 offers: the branch, uncommitted, staged and unstaged changes,
+//! and recent commits.
 
 use serde::Serialize;
 
@@ -19,6 +20,8 @@ pub struct History {
     pub uncommitted: bool,
     /// Something in the folder is staged.
     pub staged: bool,
+    /// Something in the folder differs from the index, or is untracked.
+    pub unstaged: bool,
     /// Newest first, following first parents, only those that touch the folder: the branch's commits, or the most
     /// recent ones when there is no branch.
     pub commits: Vec<Commit>,
@@ -44,10 +47,12 @@ impl Review {
         };
         let uncommitted = self.differs(&[&base])? || self.has_untracked()?;
         let staged = self.differs(&["--cached", &base])?;
+        let unstaged = self.differs(&[])? || self.has_untracked()?;
         let mut history = History {
             branch: None,
             uncommitted,
             staged,
+            unstaged,
             commits: Vec::new(),
         };
         let Some(head) = head else {
@@ -164,7 +169,7 @@ mod tests {
         let head = &history.commits[0];
         assert_eq!(head.sha, git(tmp.path(), &["rev-parse", "HEAD"]).trim());
         assert!(head.sha.starts_with(&head.short_sha));
-        assert!(!history.uncommitted && !history.staged);
+        assert!(!history.uncommitted && !history.staged && !history.unstaged);
     }
 
     #[test]
@@ -274,9 +279,12 @@ mod tests {
         git(dir, &["add", "src/b.txt"]);
         std::fs::remove_file(dir.join("new.txt")).unwrap();
         let staged = review.history().unwrap();
+        write(dir, "src/b.txt", b"changed again\n");
+        let both = review.history().unwrap();
 
-        assert!(untracked.uncommitted && !untracked.staged);
-        assert!(staged.uncommitted && staged.staged);
+        assert!(untracked.uncommitted && !untracked.staged && untracked.unstaged);
+        assert!(staged.uncommitted && staged.staged && !staged.unstaged);
+        assert!(both.uncommitted && both.staged && both.unstaged);
     }
 
     #[test]
@@ -288,7 +296,7 @@ mod tests {
 
         let history = Review::new(tmp.path().join("src")).history().unwrap();
 
-        assert!(!history.uncommitted && !history.staged);
+        assert!(!history.uncommitted && !history.staged && !history.unstaged);
     }
 
     #[test]
@@ -302,6 +310,6 @@ mod tests {
 
         assert_eq!(history.branch, None);
         assert!(history.commits.is_empty());
-        assert!(history.uncommitted && history.staged);
+        assert!(history.uncommitted && history.staged && !history.unstaged);
     }
 }

@@ -75,7 +75,7 @@ export interface Commit {
   subject: string;
 }
 
-/** What can be reviewed, from ADR 0005. */
+/** What can be reviewed, from ADR 0005 and ADR 0006. */
 export interface History {
   /** The branch's name, or null when there is no branch review. */
   branch: string | null;
@@ -83,13 +83,15 @@ export interface History {
   uncommitted: boolean;
   /** Something in the reviewed folder is staged. */
   staged: boolean;
+  /** Something in the reviewed folder differs from the index, or is untracked. */
+  unstaged: boolean;
   /** Newest first: the branch's commits, or recent ones when there is no branch. */
   commits: Commit[];
 }
 
 /**
- * Which review to show: `worktree` (uncommitted changes), `index` (staged changes), `branch`, or a commit's full
- * SHA.
+ * Which review to show: `worktree` (uncommitted changes), `index` (staged changes), `unstaged` (unstaged changes),
+ * `branch`, or a commit's full SHA.
  */
 export type Rev = string;
 

@@ -1,5 +1,5 @@
-//! Reviews of one folder of a repository, each a (base, target) pair from ADR 0002 and ADR 0005: uncommitted
-//! changes, staged changes, a whole branch, or a single commit.
+//! Reviews of one folder of a repository, each a (base, target) pair from ADR 0002, ADR 0005 and ADR 0006:
+//! uncommitted changes, staged or unstaged changes, a whole branch, or a single commit.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{ErrorKind, Read};
@@ -53,6 +53,8 @@ pub enum Rev {
     WorkTree,
     /// The staged changes: the index against `HEAD`.
     Index,
+    /// The unstaged changes, untracked files included: the working tree against the index.
+    Unstaged,
     /// Everything since the branch left the main branch: the working tree against the merge-base.
     Branch,
     /// A single commit against its first parent, given by its SHA.
@@ -60,12 +62,13 @@ pub enum Rev {
 }
 
 impl Rev {
-    /// Reads `worktree`, `index`, `branch` or a commit's SHA in lowercase hex. Anything else is refused, so that no
+    /// Reads `worktree`, `index`, `unstaged`, `branch` or a commit's SHA in lowercase hex. Anything else is refused, so that no
     /// other text ever reaches git as a revision.
     pub fn parse(rev: &str) -> Option<Self> {
         match rev {
             "worktree" => Some(Self::WorkTree),
             "index" => Some(Self::Index),
+            "unstaged" => Some(Self::Unstaged),
             "branch" => Some(Self::Branch),
             _ if (4..=64).contains(&rev.len())
                 && rev
@@ -87,20 +90,22 @@ enum Target {
     Commit(String),
 }
 
-/// A review resolved to concrete objects: `base` is a commit or the empty tree.
+/// A review resolved to concrete objects: `base` is a commit or the empty tree, or `None` for the index, which is
+/// only compared against the working tree.
 #[derive(Debug, Clone)]
 struct Comparison {
-    base: String,
+    base: Option<String>,
     target: Target,
 }
 
 impl Comparison {
-    /// The revision arguments of `git diff` that compare `base` against the target.
-    fn range<'a>(&'a self, base: &'a str) -> Vec<&'a str> {
+    /// The revision arguments of `git diff` that compare `base` against the target. Without a base, `git diff`
+    /// compares the working tree against the index.
+    fn range<'a>(&'a self, base: Option<&'a str>) -> Vec<&'a str> {
         match &self.target {
-            Target::WorkTree => vec![base],
-            Target::Index => vec!["--cached", base],
-            Target::Commit(commit) => vec![base, commit],
+            Target::WorkTree => base.into_iter().collect(),
+            Target::Index => ["--cached"].into_iter().chain(base).collect(),
+            Target::Commit(commit) => base.into_iter().chain([commit.as_str()]).collect(),
         }
     }
 }
@@ -176,7 +181,7 @@ impl Review {
             files.insert(path.to_owned(), unchanged(path, submodule));
         }
 
-        let range = comparison.range(&comparison.base);
+        let range = comparison.range(comparison.base.as_deref());
         let counts = self.numstat(&range, true)?;
         let mut args = vec!["diff"];
         args.extend(&range);
@@ -219,7 +224,7 @@ impl Review {
         } else {
             // Diffing the empty tree against the target lists every file as added, with all of its lines.
             let empty = self.empty_tree()?;
-            let lines = self.numstat(&comparison.range(&empty), false)?;
+            let lines = self.numstat(&comparison.range(Some(&empty)), false)?;
             for entry in files.values_mut() {
                 entry.lines = match entry.status {
                     Status::Deleted => 0,
@@ -280,7 +285,7 @@ impl Review {
             )?,
             _ => {
                 let mut args = vec!["diff"];
-                args.extend(comparison.range(&comparison.base));
+                args.extend(comparison.range(comparison.base.as_deref()));
                 args.extend([
                     "-M",
                     "--no-color",
@@ -302,10 +307,10 @@ impl Review {
 
     /// Resolves `rev` to the objects it compares.
     fn compare(&self, rev: &Rev) -> Result<Comparison, Error> {
-        let head = || -> Result<String, Error> {
+        let head = || -> Result<Option<String>, Error> {
             match self.commit("HEAD")? {
-                Some(head) => Ok(head),
-                None => self.empty_tree(),
+                Some(head) => Ok(Some(head)),
+                None => self.empty_tree().map(Some),
             }
         };
         Ok(match rev {
@@ -317,10 +322,15 @@ impl Review {
                 base: head()?,
                 target: Target::Index,
             },
+            Rev::Unstaged => Comparison {
+                base: None,
+                target: Target::WorkTree,
+            },
             Rev::Branch => Comparison {
-                base: self
-                    .branch_base()?
-                    .ok_or_else(|| Error::NotFound("the branch".to_owned()))?,
+                base: Some(
+                    self.branch_base()?
+                        .ok_or_else(|| Error::NotFound("the branch".to_owned()))?,
+                ),
                 target: Target::WorkTree,
             },
             Rev::Commit(sha) => {
@@ -333,7 +343,7 @@ impl Review {
                     None => self.empty_tree()?,
                 };
                 Comparison {
-                    base,
+                    base: Some(base),
                     target: Target::Commit(commit),
                 }
             }
@@ -426,7 +436,8 @@ impl Review {
                 _ => match count_lines(&self.dir.join(&entry.path)) {
                     Ok((_, true)) => 1,
                     Ok((lines, false)) => lines,
-                    // Added to the index and then deleted: git shows no change against HEAD.
+                    // Added to the index and then deleted: git shows no change against HEAD. Against the index it is
+                    // deleted, and handled above.
                     Err(Error::Read { source, .. }) if source.kind() == ErrorKind::NotFound => 0,
                     Err(err) => return Err(err),
                 },
@@ -890,6 +901,7 @@ mod tests {
     fn parses_revs() {
         assert_eq!(Rev::parse("worktree"), Some(Rev::WorkTree));
         assert_eq!(Rev::parse("index"), Some(Rev::Index));
+        assert_eq!(Rev::parse("unstaged"), Some(Rev::Unstaged));
         assert_eq!(Rev::parse("branch"), Some(Rev::Branch));
         assert_eq!(
             Rev::parse("0123abcd"),
@@ -932,6 +944,59 @@ mod tests {
         assert_eq!(kinds(&diff).last(), Some(&(LineKind::Added, "four")));
         let lib = review.diff(&Rev::Index, "src/lib.rs").unwrap();
         assert_eq!(kinds(&lib), [(LineKind::Context, "fn main() {}")]);
+    }
+
+    #[test]
+    fn unstaged_shows_only_changes_since_the_index() {
+        let tmp = repo();
+        let dir = tmp.path();
+        write(dir, "a.txt", b"one\ntwo\nthree\nfour\n");
+        git(dir, &["add", "a.txt"]);
+        write(dir, "a.txt", b"one\ntwo\nthree\nfour\nfive\n");
+        write(dir, "staged.txt", b"s\n");
+        git(dir, &["add", "staged.txt"]);
+        write(dir, "new.txt", b"n\n");
+        std::fs::remove_file(dir.join("src/lib.rs")).unwrap();
+
+        let review = Review::new(dir);
+        let files = review.files(&Rev::Unstaged).unwrap();
+
+        let a = find(&files, "a.txt");
+        assert_eq!(
+            (a.status, a.added, a.removed, a.lines),
+            (Status::Modified, 1, 0, 5)
+        );
+        let staged = find(&files, "staged.txt");
+        assert_eq!((staged.status, staged.lines), (Status::Unchanged, 1));
+        let new = find(&files, "new.txt");
+        assert_eq!((new.status, new.untracked), (Status::Added, true));
+        assert_eq!(find(&files, "src/lib.rs").status, Status::Deleted);
+        let diff = review.diff(&Rev::Unstaged, "a.txt").unwrap();
+        assert_eq!(
+            kinds(&diff),
+            [
+                (LineKind::Context, "two"),
+                (LineKind::Context, "three"),
+                (LineKind::Context, "four"),
+                (LineKind::Added, "five"),
+            ]
+        );
+        let unchanged = review.diff(&Rev::Unstaged, "staged.txt").unwrap();
+        assert_eq!(kinds(&unchanged), [(LineKind::Context, "s")]);
+    }
+
+    #[test]
+    fn unstaged_works_in_a_repo_without_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        git(tmp.path(), &["init", "--quiet"]);
+        write(tmp.path(), "staged.txt", b"s\n");
+        git(tmp.path(), &["add", "staged.txt"]);
+        write(tmp.path(), "loose.txt", b"l\n");
+
+        let files = Review::new(tmp.path()).files(&Rev::Unstaged).unwrap();
+
+        assert_eq!(find(&files, "staged.txt").status, Status::Unchanged);
+        assert_eq!(find(&files, "loose.txt").status, Status::Added);
     }
 
     #[test]
