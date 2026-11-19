@@ -4,6 +4,7 @@ mod details;
 mod diff;
 mod history;
 mod review;
+mod state;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -13,6 +14,7 @@ pub use details::{CommitDetails, Signature, Trailer};
 pub use diff::{FileDiff, Hunk, Line, LineKind};
 pub use history::{Base, Commit, History};
 pub use review::{FileEntry, Rev, Review, Status};
+pub use state::{GitDirs, Snapshot};
 
 /// An error from running git.
 #[derive(Debug, thiserror::Error)]
