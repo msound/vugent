@@ -29,8 +29,8 @@ cargo run -- --port 7777 --no-open
 cd web && npm install && npm run dev
 ```
 
-Set `VUGENT_SERVER` to proxy to a different address. Before committing, run `npm run check` and `npm run lint`
-(`npm run format` fixes formatting).
+Set `VUGENT_SERVER` to proxy to a different address. Before committing, run `npm run check`, `npm run lint` and
+`npm test` (`npm run format` fixes formatting).
 
 ## Releasing
 

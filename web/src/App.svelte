@@ -6,6 +6,7 @@
     fetchTree,
     type Base,
     type FileNode,
+    type FolderNode,
     type Rev,
   } from './lib/api';
   import Canvas from './lib/Canvas.svelte';
@@ -13,7 +14,9 @@
   import DiffPanel from './lib/DiffPanel.svelte';
   import ReviewHeader from './lib/ReviewHeader.svelte';
   import Sidebar from './lib/Sidebar.svelte';
+  import { listen } from './lib/events';
   import { layout, type Box } from './lib/layout';
+  import { affects, findFile, serial, touches, type Change } from './lib/live';
   import { pick, rowsOf, type Row } from './lib/rows';
   import { summarize, type Summary } from './lib/summary';
 
@@ -40,6 +43,17 @@
 
   // The canvas stays mounted under the diff panel, so closing the panel returns to exactly the same view.
   let openFile = $state<FileNode | undefined>();
+  /** The open file has left the review since it was opened, such as an untracked file that was deleted. */
+  let fileGone = $state(false);
+  /** Counts the changes to the open file, so that the diff panel fetches its diff again. */
+  let diffVersion = $state(0);
+  /** The server polls for changes rather than watching files (ADR 0008). */
+  let polling = $state(false);
+
+  function open(file: FileNode | undefined) {
+    openFile = file;
+    fileGone = false;
+  }
   // The detail page of ADR 0007. It stays open when a row is picked from it, and a diff opens over it.
   let detailOpen = $state(false);
 
@@ -79,8 +93,80 @@
     }
   }
 
+  /** Fetches the sidebar again, once more if asked while it is fetching. */
+  const refreshHistory = serial(() => refresh(false));
+
+  /** Counts the times the canvas starts loading a review, so that only the latest load is shown. */
+  let loads = 0;
+
+  /** Fetches the tree of `current` and lays it out, showing it unless a newer load started meanwhile. */
+  async function load(current: Rev): Promise<FolderNode | undefined> {
+    const id = ++loads;
+    const tree = await fetchTree(current);
+    const boxes = await layout(tree);
+    if (id !== loads || rev !== current) {
+      return undefined;
+    }
+    view = {
+      rev: current,
+      title: tree.name,
+      boxes,
+      summary: summarize(tree),
+    };
+    error = undefined;
+    return tree;
+  }
+
+  /** Fetches the review on the canvas again, keeping where the canvas is looking and the open diff. */
+  const reloadReview = serial(async () => {
+    const current = rev;
+    if (current === undefined || view?.rev !== current) {
+      // The selection is still loading, and gets the latest anyway.
+      return;
+    }
+    try {
+      const tree = await load(current);
+      if (tree && openFile) {
+        const file = findFile(tree, openFile.path);
+        if (file) {
+          openFile = file;
+        }
+        fileGone = file === undefined;
+      }
+    } catch (failure) {
+      if (rev === current) {
+        error = (failure as Error).message;
+      }
+    }
+  });
+
+  function onchange(change: Change) {
+    void refreshHistory();
+    if (rev === undefined || !affects(change, rev)) {
+      return;
+    }
+    void reloadReview();
+    if (openFile && touches(change, rev, openFile.path)) {
+      diffVersion += 1;
+    }
+  }
+
   onMount(() => {
     void refresh(true);
+    let opened = false;
+    return listen({
+      onopen: () => {
+        // The first time, the page is loading anyway. After a reconnect, changes may have been missed.
+        if (opened) {
+          void refreshHistory();
+          void reloadReview();
+          diffVersion += 1;
+        }
+        opened = true;
+      },
+      onchange,
+      onmode: (value) => (polling = value),
+    });
   });
 
   const selectedRow = $derived(rows?.find((row) => row.rev === rev));
@@ -99,7 +185,7 @@
 
   $effect(() => {
     const current = rev;
-    openFile = undefined;
+    open(undefined);
 
     const url = new URL(location.href);
     if (current === undefined) {
@@ -119,17 +205,7 @@
     const timer = setTimeout(
       async () => {
         try {
-          const tree = await fetchTree(current);
-          const boxes = await layout(tree);
-          if (live) {
-            view = {
-              rev: current,
-              title: tree.name,
-              boxes,
-              summary: summarize(tree),
-            };
-            error = undefined;
-          }
+          await load(current);
         } catch (failure) {
           if (live) {
             error = (failure as Error).message;
@@ -150,7 +226,7 @@
   });
 </script>
 
-<svelte:window onfocus={() => void refresh(false)} {onkeydown} />
+<svelte:window {onkeydown} />
 
 <Sidebar
   {rows}
@@ -182,7 +258,8 @@
         <Canvas
           boxes={view.boxes}
           title={view.title}
-          onopenfile={(file) => (openFile = file)}
+          {polling}
+          onopenfile={open}
         />
       </SvelteFlowProvider>
     {/key}
@@ -194,7 +271,7 @@
         {github}
         {summary}
         keys={openFile === undefined}
-        onopenfile={(file) => (openFile = file)}
+        onopenfile={open}
         onselect={(next) => (rev = next)}
         onclose={() => (detailOpen = false)}
       />
@@ -203,8 +280,10 @@
       <DiffPanel
         file={openFile}
         rev={view.rev}
+        version={diffVersion}
+        gone={fileGone}
         {context}
-        onclose={() => (openFile = undefined)}
+        onclose={() => open(undefined)}
       />
     {/if}
   {/if}

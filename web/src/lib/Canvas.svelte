@@ -16,10 +16,13 @@
   let {
     boxes,
     title,
+    polling = false,
     onopenfile,
   }: {
     boxes: Box[];
     title: string;
+    /** The server polls for changes rather than watching files (ADR 0008). */
+    polling?: boolean;
     onopenfile: (file: FileNode) => void;
   } = $props();
 
@@ -186,6 +189,14 @@
         <img src="/logo.svg" alt="" />{title}
         {#if version}<span class="version">{version}</span>{/if}
       </h1>
+      {#if polling}
+        <p
+          class="polling"
+          title="vugent cannot watch this folder for changes, so it checks every few seconds; its terminal says why."
+        >
+          Checking for changes every few seconds
+        </p>
+      {/if}
     </Panel>
   </SvelteFlow>
 </div>
@@ -218,6 +229,17 @@
     font-size: 0.75rem;
     font-weight: 400;
     color: var(--text-muted);
+  }
+
+  .polling {
+    width: fit-content;
+    margin: 0.3rem 0 0;
+    padding: 0.1rem 0.6rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--unchanged-border);
+    border-radius: 6px;
   }
 
   h1 img {

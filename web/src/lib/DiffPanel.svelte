@@ -5,11 +5,17 @@
   let {
     file,
     rev,
+    version = 0,
+    gone = false,
     context,
     onclose,
   }: {
     file: FileNode;
     rev: Rev;
+    /** Changes when the file may have changed, to fetch its diff again. */
+    version?: number;
+    /** The file is no longer part of the review. */
+    gone?: boolean;
     /** What the review is, such as a commit's short SHA and subject, shown above the path. */
     context?: string;
     onclose: () => void;
@@ -18,15 +24,33 @@
   let diff = $state<FileDiff | undefined>();
   let error = $state<string | undefined>();
 
+  // The file's node and the parent's view are replaced whenever the review is fetched again, so only the path and
+  // the review's name are followed.
+  const path = $derived(file.path);
+  const review = $derived(rev);
+  /** Which file of which review `diff` shows. */
+  let shown: string | undefined;
+
   $effect(() => {
-    const path = file.path;
-    const review = rev;
-    diff = undefined;
-    error = undefined;
+    const [wanted, wantedRev] = [path, review];
+    const key = `${wantedRev}\0${wanted}`;
+    void version;
+    if (key !== shown) {
+      diff = undefined;
+      error = undefined;
+    }
+    if (gone) {
+      return;
+    }
     let current = true;
-    fetchDiff(path, review).then(
+    // Fetched again, the diff is replaced in place, so the page keeps its scroll position.
+    fetchDiff(wanted, wantedRev).then(
       (result) => {
-        if (current) diff = result;
+        if (current) {
+          diff = result;
+          error = undefined;
+          shown = key;
+        }
       },
       (failure: Error) => {
         if (current) error = failure.message;
@@ -67,7 +91,9 @@
     </header>
   {/snippet}
 
-  {#if error}
+  {#if gone}
+    <p class="message">This file is no longer part of the review.</p>
+  {:else if error}
     <p class="message">Could not load the diff: {error}</p>
   {:else if !diff}
     <p class="message">Loading…</p>
