@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Spring } from 'svelte/motion';
   import { fetchDiff, type FileDiff, type FileNode, type Rev } from './api';
+  import FullScreen from './FullScreen.svelte';
 
   let {
     file,
@@ -30,110 +30,11 @@
     };
   });
 
-  function onkeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      onclose();
-    }
-  }
-
-  // Scrolling on past the end of the diff pulls up an elastic arc from the bottom of the screen; once it is pulled
-  // far enough, it snaps and the panel closes. Scrolling down in the panel is the same wheel direction that zooms out
-  // on the canvas, so this mirrors the zoom in that opened the diff.
-
-  /** Wheel events closer together than this, in milliseconds, belong to the same gesture. */
-  const GESTURE_GAP = 150;
-  /** How far, in pixels of wheel movement past the end, the arc must be pulled to snap. */
-  const SNAP_DISTANCE = 1200;
-  /** The arc's height when it snaps, as a share of the screen's height. */
-  const ARC_HEIGHT = 0.3;
-  /** How long the panel takes to disappear once the arc snaps, in milliseconds. */
-  const CLOSE_DURATION = 150;
-
-  let scroller = $state<HTMLElement | undefined>();
-  let height = $state(0);
-
-  // How far the arc is pulled, from 0 to 1. It springs back to 0 when the user lets go.
-  const pull = new Spring(0, { stiffness: 0.15, damping: 0.5 });
-  const arc = $derived(pull.current * ARC_HEIGHT * height);
-
-  let distance = 0;
-  let armed = false;
-  let lastWheel = -Infinity;
-  let release: ReturnType<typeof setTimeout> | undefined;
-  let closing = $state(false);
-
-  function onwheel(event: WheelEvent) {
-    if (closing || !scroller) {
-      return;
-    }
-    const scale =
-      event.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? 16
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? scroller.clientHeight
-          : 1;
-    const delta = event.deltaY * scale;
-
-    // Only a gesture that starts at the end pulls the arc. A fast scroll that carries the reader into the end stops
-    // there; they must scroll again, on purpose, to pull.
-    if (event.timeStamp - lastWheel > GESTURE_GAP) {
-      const { scrollTop, scrollHeight, clientHeight } = scroller;
-      armed = scrollTop + clientHeight >= scrollHeight - 1;
-    }
-    lastWheel = event.timeStamp;
-
-    if (!armed || delta <= 0) {
-      armed = false;
-      letGo();
-      return;
-    }
-
-    distance += delta;
-    if (distance >= SNAP_DISTANCE) {
-      snap();
-      return;
-    }
-    // The further the arc is pulled, the harder it pulls back.
-    const progress = distance / SNAP_DISTANCE;
-    void pull.set(1 - (1 - progress) ** 2, { instant: true });
-    clearTimeout(release);
-    release = setTimeout(letGo, GESTURE_GAP);
-  }
-
-  function letGo() {
-    clearTimeout(release);
-    distance = 0;
-    pull.target = 0;
-  }
-
-  function snap() {
-    clearTimeout(release);
-    void pull.set(1, { instant: true });
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      onclose();
-      return;
-    }
-    closing = true;
-    setTimeout(onclose, CLOSE_DURATION);
-  }
-
-  $effect(() => () => clearTimeout(release));
-
   const signs = { added: '+', removed: '-', context: ' ' };
 </script>
 
-<svelte:window {onkeydown} />
-
-<div
-  class="panel"
-  class:closing
-  role="dialog"
-  aria-modal="true"
-  aria-label="Diff of {file.path}"
-  bind:clientHeight={height}
->
-  <div class="scroller" bind:this={scroller} {onwheel}>
+<FullScreen label="Diff of {file.path}" {onclose}>
+  {#snippet header()}
     <header>
       <h2>
         {#if file.oldPath}
@@ -152,132 +53,50 @@
         Esc
       </button>
     </header>
+  {/snippet}
 
-    <!-- The content lifts a little as the arc is pulled, like the end of a rubber band. -->
-    <div
-      class="body"
-      style:transform={arc > 0 ? `translateY(${-arc / 4}px)` : undefined}
-    >
-      {#if error}
-        <p class="message">Could not load the diff: {error}</p>
-      {:else if !diff}
-        <p class="message">Loading…</p>
-      {:else if diff.submodule}
-        <p class="message">
-          This is a submodule; vugent does not look inside it.
-        </p>
-      {:else if diff.binary}
-        <p class="message">
-          This is a binary file, so there is no diff to show.
-        </p>
-      {:else if diff.hunks.length === 0}
-        <p class="message">
-          {#if diff.status === 'renamed'}
-            The file was renamed from {diff.oldPath}; its content did not
-            change.
-          {:else}
-            There are no lines to show.
-          {/if}
-        </p>
+  {#if error}
+    <p class="message">Could not load the diff: {error}</p>
+  {:else if !diff}
+    <p class="message">Loading…</p>
+  {:else if diff.submodule}
+    <p class="message">This is a submodule; vugent does not look inside it.</p>
+  {:else if diff.binary}
+    <p class="message">This is a binary file, so there is no diff to show.</p>
+  {:else if diff.hunks.length === 0}
+    <p class="message">
+      {#if diff.status === 'renamed'}
+        The file was renamed from {diff.oldPath}; its content did not change.
       {:else}
-        <div class="scroll">
-          <table>
-            {#each diff.hunks as hunk, index (index)}
-              <tbody>
-                <tr class="hunk">
-                  <td class="num"></td>
-                  <td class="num"></td>
-                  <td class="code" colspan="2">{hunk.header}</td>
-                </tr>
-                {#each hunk.lines as line, lineIndex (lineIndex)}
-                  <tr class={line.kind}>
-                    <td class="num">{line.oldLine ?? ''}</td>
-                    <td class="num">{line.newLine ?? ''}</td>
-                    <td class="sign">{signs[line.kind]}</td>
-                    <td class="code">{line.text}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            {/each}
-          </table>
-        </div>
+        There are no lines to show.
       {/if}
-    </div>
-  </div>
-
-  {#if arc > 0.5}
-    <!-- The canvas pushing up into the diff: an arc from the bottom-left corner to the bottom-right corner. -->
-    <svg
-      class="arc"
-      style:height="{arc}px"
-      viewBox="0 0 100 100"
-      preserveAspectRatio="none"
-      aria-hidden="true"
-    >
-      <path d="M0,100 Q50,-100 100,100 Z" vector-effect="non-scaling-stroke" />
-    </svg>
-    <p
-      class="hint"
-      style:bottom="{arc * 0.3}px"
-      style:opacity={pull.current * 2}
-    >
-      ↓ Keep scrolling to return to the diagram
     </p>
+  {:else}
+    <div class="scroll">
+      <table>
+        {#each diff.hunks as hunk, index (index)}
+          <tbody>
+            <tr class="hunk">
+              <td class="num"></td>
+              <td class="num"></td>
+              <td class="code" colspan="2">{hunk.header}</td>
+            </tr>
+            {#each hunk.lines as line, lineIndex (lineIndex)}
+              <tr class={line.kind}>
+                <td class="num">{line.oldLine ?? ''}</td>
+                <td class="num">{line.newLine ?? ''}</td>
+                <td class="sign">{signs[line.kind]}</td>
+                <td class="code">{line.text}</td>
+              </tr>
+            {/each}
+          </tbody>
+        {/each}
+      </table>
+    </div>
   {/if}
-</div>
+</FullScreen>
 
 <style>
-  .panel {
-    position: fixed;
-    inset: 0;
-    z-index: 10;
-    overflow: hidden;
-    background: var(--bg);
-    color: var(--text);
-  }
-
-  .panel.closing {
-    animation: snap 150ms ease-in forwards;
-  }
-
-  @keyframes snap {
-    to {
-      opacity: 0;
-      transform: scale(0.96);
-    }
-  }
-
-  .scroller {
-    position: absolute;
-    inset: 0;
-    overflow: auto;
-  }
-
-  .arc {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    pointer-events: none;
-  }
-
-  .arc path {
-    fill: var(--canvas);
-    stroke: var(--unchanged-border);
-    stroke-width: 1.5;
-  }
-
-  .hint {
-    position: absolute;
-    left: 0;
-    right: 0;
-    margin: 0;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    text-align: center;
-    pointer-events: none;
-  }
-
   header {
     position: sticky;
     top: 0;
