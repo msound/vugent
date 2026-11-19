@@ -136,3 +136,48 @@ body {
 .change.orange.dark {
   --change-fill: var(--orange-dark);
 }
+
+/*
+ * Activity from ADR 0008, on a box whose line counts changed in a live update. Fairy dust, when its color changes,
+ * bumps it slightly and fades its new color in from --from-fill and --from-border (the Sparks component adds the
+ * particles); a glow, when only its counts change, pulses in its color. With reduced motion only the color fades.
+ */
+.activity-dust {
+  animation:
+    activity-bump 450ms ease-out,
+    activity-fade 700ms ease-out;
+}
+
+.activity-glow {
+  animation: activity-glow 900ms ease-out;
+}
+
+@keyframes activity-bump {
+  35% {
+    transform: scale(1.04);
+  }
+}
+
+@keyframes activity-fade {
+  from {
+    background-color: var(--from-fill);
+    border-color: var(--from-border);
+  }
+}
+
+@keyframes activity-glow {
+  40% {
+    box-shadow: 0 0 var(--glow-size) calc(var(--glow-size) / 3)
+      var(--change-border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-dust {
+    animation: activity-fade 700ms ease-out;
+  }
+
+  .activity-glow {
+    animation: none;
+  }
+}

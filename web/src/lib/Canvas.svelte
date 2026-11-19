@@ -1,3 +1,12 @@
+<script lang="ts" module>
+  import type { Activity } from './activity';
+
+  /** Activity being shown on a box; a new nonce starts the animation over. */
+  export interface Shown extends Activity {
+    nonce: number;
+  }
+</script>
+
 <script lang="ts">
   import {
     Panel,
@@ -8,6 +17,8 @@
     type Viewport,
   } from '@xyflow/svelte';
   import '@xyflow/svelte/dist/style.css';
+  import { untrack } from 'svelte';
+  import { targets } from './activity';
   import FileView from './FileView.svelte';
   import FolderView from './FolderView.svelte';
   import { fetchVersion, type FileNode } from './api';
@@ -16,11 +27,14 @@
   let {
     boxes,
     title,
+    activity,
     polling = false,
     onopenfile,
   }: {
     boxes: Box[];
     title: string;
+    /** The boxes whose line counts changed in the last live update, by box id, and a number for that update. */
+    activity?: { nonce: number; changed: Map<string, Activity> };
     /** The server polls for changes rather than watching files (ADR 0008). */
     polling?: boolean;
     onopenfile: (file: FileNode) => void;
@@ -86,6 +100,30 @@
     return low === 0 ? -Infinity : thresholds[low - 1];
   });
 
+  /** How long activity stays on a box, in milliseconds; longer than its animations. */
+  const ACTIVITY_DURATION = 1500;
+
+  /** The boxes animating now, by box id. */
+  let shown = $state(new Map<string, Shown>());
+
+  // Each live update animates the boxes on screen as they are then. The animation is left alone afterwards, so a box
+  // that scrolls into view or opens later does not animate again.
+  $effect(() => {
+    if (!activity) {
+      return;
+    }
+    const { nonce, changed } = activity;
+    shown = untrack(() => {
+      const screen = { ...viewport, width, height };
+      const found = targets(changed, boxes, reached, screen);
+      return new Map(
+        [...found].map(([id, change]) => [id, { ...change, nonce }]),
+      );
+    });
+    const timer = setTimeout(() => (shown = new Map()), ACTIVITY_DURATION);
+    return () => clearTimeout(timer);
+  });
+
   const nodes = $derived<Node[]>(
     boxes.map((box) => ({
       id: box.id,
@@ -97,6 +135,7 @@
       data: {
         box,
         open: box.kind === 'folder' && box.openZoom <= reached,
+        activity: shown.get(box.id),
       },
       hidden: box.revealZoom > reached,
       draggable: false,

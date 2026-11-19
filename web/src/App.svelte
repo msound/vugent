@@ -15,6 +15,7 @@
   import ReviewHeader from './lib/ReviewHeader.svelte';
   import Sidebar from './lib/Sidebar.svelte';
   import { listen } from './lib/events';
+  import { compare, type Activity } from './lib/activity';
   import { layout, type Box } from './lib/layout';
   import { affects, findFile, serial, touches, type Change } from './lib/live';
   import { pick, rowsOf, type Row } from './lib/rows';
@@ -36,7 +37,16 @@
 
   /** What the canvas shows. It is kept while the next review loads, so the canvas does not flash. */
   let view = $state<
-    { rev: Rev; title: string; boxes: Box[]; summary: Summary } | undefined
+    | {
+        rev: Rev;
+        tree: FolderNode;
+        title: string;
+        boxes: Box[];
+        summary: Summary;
+        /** What changed since the review was last fetched, when it was fetched again. */
+        activity?: { nonce: number; changed: Map<string, Activity> };
+      }
+    | undefined
   >();
   let loading = $state(false);
   let error = $state<string | undefined>();
@@ -107,11 +117,18 @@
     if (id !== loads || rev !== current) {
       return undefined;
     }
+    // Fetched again, the boxes whose line counts changed animate (ADR 0008).
+    const activity =
+      view?.rev === current
+        ? { nonce: id, changed: compare(view.tree, tree) }
+        : undefined;
     view = {
       rev: current,
+      tree,
       title: tree.name,
       boxes,
       summary: summarize(tree),
+      activity,
     };
     error = undefined;
     return tree;
@@ -258,6 +275,7 @@
         <Canvas
           boxes={view.boxes}
           title={view.title}
+          activity={view.activity}
           {polling}
           onopenfile={open}
         />

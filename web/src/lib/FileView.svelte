@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { fromColors } from './activity';
   import type { FileBox } from './layout';
+  import Sparks from './Sparks.svelte';
+  import type { Shown } from './Canvas.svelte';
 
-  let { data }: { data: { box: FileBox } } = $props();
+  let { data }: { data: { box: FileBox; activity?: Shown } } = $props();
 
   const box = $derived(data.box);
   const file = $derived(box.file);
@@ -17,23 +20,37 @@
     }
     return `+${file.added} −${file.removed}`;
   });
+  const activity = $derived(data.activity);
+  const from = $derived(fromColors(activity?.from));
 </script>
 
-<div
-  class="file change {file.hue} {file.shade}"
-  class:deleted={file.status === 'deleted'}
-  style:width="{box.width}px"
-  style:height="{box.height}px"
-  title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
->
-  <span class="name">{box.name}</span>
-  {#if detail}
-    <span class="detail">{detail}</span>
-  {/if}
-</div>
+<!-- A new activity draws the box again, which starts its animation over. -->
+{#key activity?.nonce}
+  <div
+    class="file change {file.hue} {file.shade}"
+    class:deleted={file.status === 'deleted'}
+    class:activity-dust={activity?.effect === 'dust'}
+    class:activity-glow={activity?.effect === 'glow'}
+    style:width="{box.width}px"
+    style:height="{box.height}px"
+    style:--from-fill={from.fill}
+    style:--from-border={from.border}
+    style:--glow-size="18px"
+    title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+  >
+    <span class="name">{box.name}</span>
+    {#if detail}
+      <span class="detail">{detail}</span>
+    {/if}
+    {#if activity?.effect === 'dust'}
+      <Sparks width={box.width} height={box.height} />
+    {/if}
+  </div>
+{/key}
 
 <style>
   .file {
+    position: relative;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
