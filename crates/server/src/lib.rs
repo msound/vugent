@@ -1,11 +1,12 @@
 //! The HTTP server behind vugent's browser UI.
 
+mod events;
 mod tree;
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{FromRef, Query, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -15,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use vugent_git::{Rev, Review};
 
+pub use events::Events;
+
 /// The built frontend, which `npm run build` in `web/` writes to this crate's `frontend/` folder. In debug builds
 /// rust-embed reads it from disk at run time; in release builds it is compiled in. It may be missing when the frontend
 /// has not been built (see `build.rs`).
@@ -23,8 +26,27 @@ use vugent_git::{Rev, Review};
 #[allow_missing = true]
 struct Frontend;
 
-/// Builds the application's routes, serving `review`.
-pub fn router(review: Review) -> Router {
+/// What the handlers share.
+#[derive(Clone)]
+struct AppState {
+    review: Arc<Review>,
+    events: Events,
+}
+
+impl FromRef<AppState> for Arc<Review> {
+    fn from_ref(state: &AppState) -> Self {
+        state.review.clone()
+    }
+}
+
+impl FromRef<AppState> for Events {
+    fn from_ref(state: &AppState) -> Self {
+        state.events.clone()
+    }
+}
+
+/// Builds the application's routes, serving `review` and streaming `events`, which should be of the same folder.
+pub fn router(review: Review, events: Events) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/version", get(version))
@@ -32,14 +54,21 @@ pub fn router(review: Review) -> Router {
         .route("/api/commit", get(commit))
         .route("/api/tree", get(tree))
         .route("/api/diff", get(diff))
+        .route("/api/events", get(events::events))
         .fallback(frontend)
-        .with_state(Arc::new(review))
+        .with_state(AppState {
+            review: Arc::new(review),
+            events,
+        })
 }
 
-/// Serves `router` on `listener` until Ctrl-C is pressed.
-pub async fn serve(listener: TcpListener, router: Router) -> std::io::Result<()> {
+/// Serves `router` on `listener` until Ctrl-C is pressed, then closes the streams of `events`.
+pub async fn serve(listener: TcpListener, router: Router, events: Events) -> std::io::Result<()> {
     axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            shutdown_signal().await;
+            events.close();
+        })
         .await
 }
 
@@ -260,7 +289,8 @@ mod tests {
     }
 
     async fn get_in(dir: impl Into<std::path::PathBuf>, path: &str) -> Response {
-        router(Review::new(dir))
+        let review = Review::new(dir);
+        router(review.clone(), Events::new(review, true))
             .oneshot(Request::get(path).body(Body::empty()).unwrap())
             .await
             .unwrap()
@@ -327,7 +357,7 @@ mod tests {
     }
 
     /// A repository with a committed `src/a.txt` that has since been changed.
-    fn repo() -> tempfile::TempDir {
+    pub(crate) fn repo() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join("src");
         std::fs::create_dir(&src).unwrap();

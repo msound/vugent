@@ -78,7 +78,8 @@ plugins, is left to the plugin architecture (#8) and caching (#7) ADRs.
 ### Pushing to the browser
 
 * `GET /api/events` is a Server-Sent Events stream of the events above, as JSON, such as
-  `event: files` with `{"paths": ["src/lib.rs"]}`.
+  `event: files` with `{"paths": ["src/lib.rs"]}`. It starts with a `mode` event, such as `{"polling": false}`, and
+  sends it again when vugent falls back to polling, so that the UI can show it.
 * When the stream opens, including after a reconnect, the browser fetches the sidebar and the selected review again,
   since it may have missed events. This replaces the refresh when the window regains focus.
 * On an event, the browser fetches the sidebar again if it is affected, and the selected review if it is affected.

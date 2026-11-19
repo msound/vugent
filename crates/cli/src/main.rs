@@ -27,6 +27,11 @@ struct Args {
     /// exists.
     #[arg(long, value_name = "REF")]
     base: Option<String>,
+
+    /// Check for changes every few seconds instead of watching files, for file systems that report no changes, such
+    /// as network drives or /mnt/c under WSL.
+    #[arg(long)]
+    poll: bool,
 }
 
 #[tokio::main]
@@ -65,7 +70,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    vugent_server::serve(listener, vugent_server::router(review)).await?;
+    let events = vugent_server::Events::new(review.clone(), args.poll);
+    let router = vugent_server::router(review, events.clone());
+    vugent_server::serve(listener, router, events).await?;
     Ok(())
 }
 
@@ -86,6 +93,7 @@ mod tests {
         assert_eq!(args.port, 0);
         assert!(!args.no_open);
         assert_eq!(args.base, None);
+        assert!(!args.poll);
     }
 
     #[test]
@@ -97,11 +105,13 @@ mod tests {
             "--no-open",
             "--base",
             "develop",
+            "--poll",
             "src",
         ]);
         assert_eq!(args.path, PathBuf::from("src"));
         assert_eq!(args.base.as_deref(), Some("develop"));
         assert_eq!(args.port, 7777);
         assert!(args.no_open);
+        assert!(args.poll);
     }
 }

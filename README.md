@@ -13,7 +13,9 @@ target/release/vugent .
 
 `vugent` listens on a free port on `127.0.0.1` and opens the UI in your browser. Use `--port` to pick the port and
 `--no-open` to only print the URL. The branch is compared against the first of `origin/HEAD`, `main` and `master`
-that exists; use `--base <ref>` to compare against another branch. If the frontend was not built, cargo prints a
+that exists; use `--base <ref>` to compare against another branch. The UI follows changes as they happen by
+watching the folder; use `--poll` to check every few seconds instead, on file systems that report no changes, such as
+network drives or `/mnt/c` under WSL. If the frontend was not built, cargo prints a
 warning and the binary still runs, but the UI explains how to build it. Set `VUGENT_REQUIRE_FRONTEND=1` to make the
 build fail instead.
 
