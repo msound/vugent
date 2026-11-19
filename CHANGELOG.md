@@ -2,6 +2,28 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.2.0](https://github.com/msound/vugent/compare/60cf2f638688c35a7e308ad152e72ed106b864e3..v0.2.0) - 2026-11-19
+#### Features
+- open the review's detail page from its header - ([806460d](https://github.com/msound/vugent/commit/806460da1170066e68cf9bb535b3d66b1158bb92)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- show a header for the selected review - ([f2a968e](https://github.com/msound/vugent/commit/f2a968ebe8d02f8b221814241b919d48a0a71f86)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- read commit details and the branch base - ([07d2dbf](https://github.com/msound/vugent/commit/07d2dbf7d50c06cc01db4a71cfce89b96708e853)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- split uncommitted changes into staged and unstaged - ([e39fd31](https://github.com/msound/vugent/commit/e39fd3118198ac233f296cc022cf6e90b6fdd75f)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- pick what to review from a commit history sidebar - ([2aa7cf2](https://github.com/msound/vugent/commit/2aa7cf2f059228ce70033462c06e96d1f971e3b7)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- serve commits, staged changes and branch reviews - ([c5400d6](https://github.com/msound/vugent/commit/c5400d6d9d26671a47ac1e17e02984865cd2e355)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- review the index, a commit or the branch in the git crate - ([4a6b293](https://github.com/msound/vugent/commit/4a6b293a98e1fc2c8ef85cc9f830015b7e3ba3fb)) - [@msound](https://github.com/msound), Claude Opus 5.5
+#### Bug Fixes
+- read trailers from every footer paragraph - ([135b0cc](https://github.com/msound/vugent/commit/135b0cc8b894dc03bd97f8648dfe008ce6e9e562)) - [@msound](https://github.com/msound), Claude Opus 5.5
+#### Documentation
+- describe the cocogitto release process - ([925bed7](https://github.com/msound/vugent/commit/925bed784f552ad352df8eaaa5fadfe017a1f271)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- add ADR for the review header and detail page - ([d46850a](https://github.com/msound/vugent/commit/d46850a558712172f6b4eee9faf60cbb3a5ff9e3)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- add ADR for branch, staged and single-commit review - ([7fd0021](https://github.com/msound/vugent/commit/7fd0021375c2964f42df0947c48cd5619ed8478a)) - [@msound](https://github.com/msound), Claude Opus 5.5
+#### Refactoring
+- share the rubber band between full-screen pages - ([c489420](https://github.com/msound/vugent/commit/c4894209dfd1738fc48173f9045980fd61a0401d)) - [@msound](https://github.com/msound), Claude Opus 5.5
+#### Miscellaneous Chores
+- end CHANGELOG.md with a newline - ([60cf2f6](https://github.com/msound/vugent/commit/60cf2f638688c35a7e308ad152e72ed106b864e3)) - [@msound](https://github.com/msound), Claude Opus 5.5
+
+- - -
+
 ## [v0.1.0](https://github.com/msound/vugent/compare/8be436b23e59503c79e6a9e211b89f4a7580f08a..v0.1.0) - 2026-11-19
 #### Features
 - scroll past the end of a diff to close it - ([5117729](https://github.com/msound/vugent/commit/5117729efe50e9f9693ec55f8f5f3024395b0554)) - [@msound](https://github.com/msound), Claude Opus 5.5
