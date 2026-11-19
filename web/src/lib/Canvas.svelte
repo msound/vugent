@@ -36,8 +36,9 @@
   let width = $state(0);
   let height = $state(0);
 
-  async function oninit() {
-    await flow.fitView({ padding: fitPadding });
+  // Svelte Flow fits the view itself (the fitView prop). Calling flow.fitView() here instead loops forever inside
+  // Svelte Flow for some trees, such as one with only files at the root, and the page freezes.
+  function oninit() {
     viewport = flow.getViewport();
   }
 
@@ -155,6 +156,8 @@
     edges={[]}
     {nodeTypes}
     {oninit}
+    fitView
+    fitViewOptions={{ padding: fitPadding }}
     {onmove}
     {onnodeclick}
     minZoom={0.0005}
