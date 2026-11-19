@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 use crate::review::Review;
-use crate::{Error, run, run_code, run_with};
+use crate::{Error, run, run_with};
 
 /// How many commits are listed when there is no branch to limit them.
 const FALLBACK_COMMITS: &str = "50";
@@ -63,9 +63,9 @@ impl Review {
             Some(head) => head.clone(),
             None => self.empty_tree()?,
         };
-        let uncommitted = self.differs(&[&base])? || self.has_untracked()?;
-        let staged = self.differs(&["--cached", &base])?;
-        let unstaged = self.differs(&[])? || self.has_untracked()?;
+        let uncommitted = self.differs(&["diff-index", &base])? || self.has_untracked()?;
+        let staged = self.differs(&["diff-index", "--cached", &base])?;
+        let unstaged = self.differs(&["diff-files"])? || self.has_untracked()?;
         let mut history = History {
             branch: None,
             base: None,
@@ -91,14 +91,10 @@ impl Review {
         Ok(history)
     }
 
-    /// Whether `git diff <range>` finds a change in the folder.
-    fn differs(&self, range: &[&str]) -> Result<bool, Error> {
-        let mut args = vec!["diff"];
-        args.extend(range);
-        args.extend(["--quiet", "--no-ext-diff", "--no-textconv", "--", "."]);
-        // --quiet exits with 1 when there are changes.
-        let (code, _) = run_code(self.dir(), &args, &[0, 1])?;
-        Ok(code == 1)
+    /// Whether the diff `command` finds a change in the folder. Porcelain `git diff --quiet` would write the index,
+    /// and plumbing's `--quiet` counts files whose stat data alone changed, so the changes are listed instead.
+    fn differs(&self, command: &[&str]) -> Result<bool, Error> {
+        Ok(!self.changes(command, false)?.is_empty())
     }
 
     fn has_untracked(&self) -> Result<bool, Error> {
@@ -178,7 +174,7 @@ impl Review {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{git, write};
+    use crate::testing::{git, make_stale, write};
 
     fn commit(dir: &std::path::Path, path: &str, content: &str, message: &str) -> String {
         write(dir, path, content.as_bytes());
@@ -372,6 +368,16 @@ mod tests {
         assert!(untracked.uncommitted && !untracked.staged && untracked.unstaged);
         assert!(staged.uncommitted && staged.staged && !staged.unstaged);
         assert!(both.uncommitted && both.staged && both.unstaged);
+    }
+
+    #[test]
+    fn files_whose_stat_data_alone_changed_do_not_count() {
+        let tmp = repo();
+        make_stale(tmp.path(), "src/b.txt");
+
+        let history = Review::new(tmp.path()).history().unwrap();
+
+        assert!(!history.uncommitted && !history.staged && !history.unstaged);
     }
 
     #[test]

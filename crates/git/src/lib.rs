@@ -5,9 +5,9 @@ mod diff;
 mod history;
 mod review;
 
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub use details::{CommitDetails, Signature, Trailer};
 pub use diff::{FileDiff, Hunk, Line, LineKind};
@@ -60,21 +60,46 @@ pub fn repo_root(path: &Path) -> Result<PathBuf, Error> {
 
 /// Runs `git -C <dir> <args>` and returns its stdout, failing unless git exits with one of `ok_codes`.
 fn run_with(dir: &Path, args: &[&str], ok_codes: &[i32]) -> Result<Vec<u8>, Error> {
-    run_code(dir, args, ok_codes).map(|(_, stdout)| stdout)
+    run_input(dir, args, None, ok_codes)
 }
 
-/// Runs `git -C <dir> <args>` and returns its exit code and stdout, failing unless the code is one of `ok_codes`.
-fn run_code(dir: &Path, args: &[&str], ok_codes: &[i32]) -> Result<(i32, Vec<u8>), Error> {
-    let output = Command::new("git")
+/// Runs `git -C <dir> <args>` with `input` on its stdin and returns its stdout.
+fn run_stdin(dir: &Path, args: &[&str], input: &[u8]) -> Result<Vec<u8>, Error> {
+    run_input(dir, args, Some(input), &[0])
+}
+
+/// Runs `git -C <dir> <args>`, feeding it `input` when given, and returns its stdout, failing unless git exits with
+/// one of `ok_codes`.
+fn run_input(
+    dir: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+    ok_codes: &[i32],
+) -> Result<Vec<u8>, Error> {
+    let mut child = Command::new("git")
         .arg("-C")
         .arg(dir)
         .args(args)
-        // vugent only reads: stop git from refreshing the index as a side effect.
+        // vugent only reads: stop git from taking optional locks, such as for refreshing the index. Porcelain `git
+        // diff` refreshes the index regardless, so worktree comparisons use plumbing instead.
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(Error::Spawn)?;
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        // Write from another thread, so that git filling its stdout cannot block us both.
+        let input = input.to_vec();
+        std::thread::spawn(move || stdin.write_all(&input));
+    }
+    let output = child.wait_with_output().map_err(Error::Spawn)?;
     match output.status.code() {
-        Some(code) if ok_codes.contains(&code) => Ok((code, output.stdout)),
+        Some(code) if ok_codes.contains(&code) => Ok(output.stdout),
         _ => Err(Error::Failed {
             args: args.join(" "),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
@@ -122,6 +147,17 @@ pub(crate) mod testing {
         let path = dir.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();
+    }
+
+    /// Gives the file at `path` under `dir` a modification time from long ago, so that the index's stat data no
+    /// longer matches it although its content does. That tempts git into refreshing the index.
+    pub fn make_stale(dir: &Path, path: &str) {
+        let file = std::fs::File::options()
+            .write(true)
+            .open(dir.join(path))
+            .unwrap();
+        file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000))
+            .unwrap();
     }
 }
 

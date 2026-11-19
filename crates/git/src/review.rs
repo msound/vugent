@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::diff::{self, FileDiff};
-use crate::{Error, run, run_with};
+use crate::{Error, run, run_stdin, run_with};
 
 /// How a file changed between the base and the target of a review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -99,15 +99,43 @@ struct Comparison {
 }
 
 impl Comparison {
-    /// The revision arguments of `git diff` that compare `base` against the target. Without a base, `git diff`
-    /// compares the working tree against the index.
-    fn range<'a>(&'a self, base: Option<&'a str>) -> Vec<&'a str> {
-        match &self.target {
-            Target::WorkTree => base.into_iter().collect(),
-            Target::Index => ["--cached"].into_iter().chain(base).collect(),
-            Target::Commit(commit) => base.into_iter().chain([commit.as_str()]).collect(),
+    /// The git command, with its revisions, that compares `base` against the target. Without a base, the working tree
+    /// is compared against the index.
+    ///
+    /// These are plumbing commands: porcelain `git diff` writes a refreshed index whenever it finds a working tree
+    /// file whose stat data changed but whose content did not, even with `GIT_OPTIONAL_LOCKS=0`. Plumbing never
+    /// writes, but lists such files as modified, so [`Review::changes`] filters them out.
+    fn command<'a>(&'a self, base: Option<&'a str>) -> Vec<&'a str> {
+        match (&self.target, base) {
+            (Target::WorkTree, Some(base)) => vec!["diff-index", base],
+            (Target::WorkTree, None) => vec!["diff-files"],
+            (Target::Index, base) => ["diff-index", "--cached"].into_iter().chain(base).collect(),
+            (Target::Commit(commit), base) => ["diff-tree", "-r"]
+                .into_iter()
+                .chain(base)
+                .chain([commit.as_str()])
+                .collect(),
         }
     }
+}
+
+/// A changed file, as listed by the `--raw` output of git's diff commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Change {
+    /// git's status letter, such as `A`, `D`, `M` or `R`.
+    pub status: u8,
+    pub path: String,
+    /// The path before a rename or copy.
+    pub old_path: Option<String>,
+}
+
+/// A change listed as modified that may only be new stat data.
+struct StatCandidate {
+    /// Its position in the list of changes.
+    index: usize,
+    symlink: bool,
+    /// The blob id in the base of the comparison.
+    old_id: String,
 }
 
 /// git looks for a NUL byte in this many leading bytes to decide whether a file is binary.
@@ -181,24 +209,19 @@ impl Review {
             files.insert(path.to_owned(), unchanged(path, submodule));
         }
 
-        let range = comparison.range(comparison.base.as_deref());
-        let counts = self.numstat(&range, true)?;
-        let mut args = vec!["diff"];
-        args.extend(&range);
-        args.extend(["-M", "--name-status", "-z", "--relative", "--", "."]);
-        let names = run(&self.dir, &args)?;
-        let mut names = split_z(&names).into_iter();
-        while let Some(code) = names.next() {
-            let (status, old_path) = match code.as_bytes().first() {
-                Some(b'A') => (Status::Added, None),
-                Some(b'D') => (Status::Deleted, None),
-                Some(b'R') => (Status::Renamed, names.next()),
-                // C (copied) only appears with -C, but its record has two paths as well.
-                Some(b'C') => (Status::Added, names.next()),
-                _ => (Status::Modified, None),
+        let command = comparison.command(comparison.base.as_deref());
+        let counts = self.numstat(&command, true)?;
+        for change in self.changes(&command, true)? {
+            let status = match change.status {
+                b'A' => Status::Added,
+                b'D' => Status::Deleted,
+                b'R' => Status::Renamed,
+                // C (copied) only appears with -C.
+                b'C' => Status::Added,
+                _ => Status::Modified,
             };
-            let Some(path) = names.next() else { break };
-            if let (Status::Renamed, Some(old)) = (status, old_path) {
+            let path = change.path.as_str();
+            if let (Status::Renamed, Some(old)) = (status, &change.old_path) {
                 files.remove(old);
             }
             let (added, removed, binary) = counts.get(path).copied().unwrap_or_default();
@@ -211,9 +234,7 @@ impl Review {
                 entry.removed = removed;
                 entry.binary = binary;
             }
-            entry.old_path = old_path
-                .filter(|_| status == Status::Renamed)
-                .map(str::to_owned);
+            entry.old_path = change.old_path.filter(|_| status == Status::Renamed);
         }
 
         if comparison.target == Target::WorkTree {
@@ -224,7 +245,7 @@ impl Review {
         } else {
             // Diffing the empty tree against the target lists every file as added, with all of its lines.
             let empty = self.empty_tree()?;
-            let lines = self.numstat(&comparison.range(Some(&empty)), false)?;
+            let lines = self.numstat(&comparison.command(Some(&empty)), false)?;
             for entry in files.values_mut() {
                 entry.lines = match entry.status {
                     Status::Deleted => 0,
@@ -284,9 +305,9 @@ impl Review {
                 &[0, 1],
             )?,
             _ => {
-                let mut args = vec!["diff"];
-                args.extend(comparison.range(comparison.base.as_deref()));
+                let mut args = comparison.command(comparison.base.as_deref());
                 args.extend([
+                    "-p",
                     "-M",
                     "--no-color",
                     "--no-ext-diff",
@@ -451,15 +472,96 @@ impl Review {
         run(&self.dir, &["cat-file", "blob", object])
     }
 
-    /// Line counts of changed tracked files between the revisions of `range`, keyed by their path:
+    /// The changed tracked files that the diff `command` lists, leaving out working tree files whose stat data
+    /// changed but whose content and mode did not.
+    pub(crate) fn changes(&self, command: &[&str], renames: bool) -> Result<Vec<Change>, Error> {
+        let mut args = command.to_vec();
+        args.extend([
+            if renames { "-M" } else { "--no-renames" },
+            "--raw",
+            "-z",
+            "--relative",
+            "--",
+            ".",
+        ]);
+        let out = run(&self.dir, &args)?;
+        let mut changes = Vec::new();
+        let mut candidates = Vec::new();
+        let mut records = split_z(&out).into_iter();
+        while let Some(meta) = records.next() {
+            // :<old mode> <new mode> <old id> <new id> <status>, then the path, or the old and new paths of a rename
+            // or copy.
+            let fields: Vec<_> = meta.trim_start_matches(':').split(' ').collect();
+            let [old_mode, new_mode, old_id, new_id, status] = fields[..] else {
+                break;
+            };
+            let status = status.as_bytes().first().copied().unwrap_or(b'M');
+            let old_path = if matches!(status, b'R' | b'C') {
+                records.next()
+            } else {
+                None
+            };
+            let Some(path) = records.next() else { break };
+            // The id of a working tree file is unknown (all zeros) unless the index's stat data says it is clean.
+            // Submodules are left alone: theirs is unknown when they have changes of their own.
+            if status == b'M'
+                && old_mode == new_mode
+                && new_mode != "160000"
+                && new_id.bytes().all(|byte| byte == b'0')
+            {
+                candidates.push(StatCandidate {
+                    index: changes.len(),
+                    symlink: new_mode == "120000",
+                    old_id: old_id.to_owned(),
+                });
+            }
+            changes.push(Change {
+                status,
+                path: path.to_owned(),
+                old_path: old_path.map(str::to_owned),
+            });
+        }
+
+        let mut same = vec![false; changes.len()];
+        // hash-object reads its paths one per line, and follows symbolic links.
+        let (links, files): (Vec<_>, Vec<_>) = candidates
+            .iter()
+            .filter(|candidate| !changes[candidate.index].path.contains('\n'))
+            .partition(|candidate| candidate.symlink);
+        if !files.is_empty() {
+            let paths: String = files
+                .iter()
+                .map(|candidate| format!("{}\n", changes[candidate.index].path))
+                .collect();
+            // Without -w nothing is written. Hashing a path applies its clean filters, as adding it would.
+            let ids = run_stdin(
+                &self.dir,
+                &["hash-object", "--stdin-paths"],
+                paths.as_bytes(),
+            )?;
+            for (candidate, id) in files.iter().zip(String::from_utf8_lossy(&ids).lines()) {
+                same[candidate.index] = id == candidate.old_id;
+            }
+        }
+        for candidate in links {
+            // read() gives a symbolic link's target, which is what git stores.
+            if let Ok(target) = read(&self.dir.join(&changes[candidate.index].path)) {
+                same[candidate.index] = target == self.blob(&candidate.old_id)?;
+            }
+        }
+        let mut same = same.into_iter();
+        changes.retain(|_| !same.next().unwrap_or(false));
+        Ok(changes)
+    }
+
+    /// Line counts of changed tracked files that the diff `command` lists, keyed by their path:
     /// (added, removed, binary).
     fn numstat(
         &self,
-        range: &[&str],
+        command: &[&str],
         renames: bool,
     ) -> Result<HashMap<String, (u32, u32, bool)>, Error> {
-        let mut args = vec!["diff"];
-        args.extend(range);
+        let mut args = command.to_vec();
         args.extend([
             if renames { "-M" } else { "--no-renames" },
             "--numstat",
@@ -566,7 +668,7 @@ fn count_lines(path: &Path) -> Result<(u32, bool), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{git, write};
+    use crate::testing::{git, make_stale, write};
     use crate::{FileDiff, LineKind};
 
     /// A repository with one commit: `a.txt`, `src/lib.rs` and `src/old.rs`.
@@ -880,17 +982,85 @@ mod tests {
         let tmp = repo();
         write(tmp.path(), "a.txt", b"changed\n");
         write(tmp.path(), "new.txt", b"new\n");
-        // Make the index stat data stale, which tempts git into refreshing it.
-        write(tmp.path(), "src/lib.rs", b"fn main() {}\n");
+        make_stale(tmp.path(), "src/lib.rs");
         let index = tmp.path().join(".git/index");
         let before = std::fs::read(&index).unwrap();
 
         let review = Review::new(tmp.path());
-        review.files(&Rev::WorkTree).unwrap();
+        review.history().unwrap();
+        for rev in [Rev::WorkTree, Rev::Unstaged, Rev::Index] {
+            review.files(&rev).unwrap();
+            review.diff(&rev, "src/lib.rs").unwrap();
+        }
         review.diff(&Rev::WorkTree, "a.txt").unwrap();
         review.diff(&Rev::WorkTree, "new.txt").unwrap();
 
         assert_eq!(std::fs::read(&index).unwrap(), before);
+    }
+
+    #[test]
+    fn files_whose_stat_data_alone_changed_are_unchanged() {
+        let tmp = repo();
+        let dir = tmp.path();
+        write(dir, "image.bin", b"\0\x01\x02");
+        git(dir, &["add", "image.bin"]);
+        git(dir, &["commit", "--quiet", "-m", "image"]);
+        make_stale(dir, "src/lib.rs");
+        make_stale(dir, "image.bin");
+        write(dir, "a.txt", b"changed\n");
+
+        for rev in [Rev::WorkTree, Rev::Unstaged] {
+            let files = Review::new(dir).files(&rev).unwrap();
+
+            assert_eq!(
+                find(&files, "src/lib.rs").status,
+                Status::Unchanged,
+                "{rev:?}"
+            );
+            assert_eq!(
+                find(&files, "image.bin").status,
+                Status::Unchanged,
+                "{rev:?}"
+            );
+            assert_eq!(find(&files, "a.txt").status, Status::Modified, "{rev:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_made_again_is_unchanged() {
+        let tmp = repo();
+        let dir = tmp.path();
+        std::os::unix::fs::symlink("a.txt", dir.join("link")).unwrap();
+        git(dir, &["add", "link"]);
+        git(dir, &["commit", "--quiet", "-m", "link"]);
+        make_stale(dir, "a.txt");
+        // Making the link again gives it new stat data; set_modified would follow it instead.
+        std::fs::remove_file(dir.join("link")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::os::unix::fs::symlink("a.txt", dir.join("link")).unwrap();
+
+        let files = Review::new(dir).files(&Rev::WorkTree).unwrap();
+
+        assert_eq!(find(&files, "link").status, Status::Unchanged);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_mode_change_alone_is_modified() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = repo();
+        let dir = tmp.path();
+        let lib = dir.join("src/lib.rs");
+        std::fs::set_permissions(&lib, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let files = Review::new(dir).files(&Rev::WorkTree).unwrap();
+
+        let entry = find(&files, "src/lib.rs");
+        assert_eq!(
+            (entry.status, entry.added, entry.removed),
+            (Status::Modified, 0, 0)
+        );
     }
 
     fn head(dir: &Path) -> String {
