@@ -1,5 +1,6 @@
 //! Runs the `git` CLI and parses its output.
 
+mod details;
 mod diff;
 mod history;
 mod review;
@@ -8,8 +9,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub use details::{CommitDetails, Signature, Trailer};
 pub use diff::{FileDiff, Hunk, Line, LineKind};
-pub use history::{Commit, History};
+pub use history::{Base, Commit, History};
 pub use review::{FileEntry, Rev, Review, Status};
 
 /// An error from running git.

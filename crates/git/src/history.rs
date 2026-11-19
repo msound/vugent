@@ -16,6 +16,8 @@ pub struct History {
     /// The current branch's name, or the short SHA of a detached `HEAD`. `None` when there is no branch review: on
     /// the main branch itself, when no main branch is found, or when no commit of the branch touches the folder.
     pub branch: Option<String>,
+    /// What the branch is compared against; `None` exactly when `branch` is.
+    pub base: Option<Base>,
     /// Something in the folder differs from `HEAD`, or is untracked.
     pub uncommitted: bool,
     /// Something in the folder is staged.
@@ -25,6 +27,18 @@ pub struct History {
     /// Newest first, following first parents, only those that touch the folder: the branch's commits, or the most
     /// recent ones when there is no branch.
     pub commits: Vec<Commit>,
+    /// The repository's web address when `origin` is on GitHub, such as `https://github.com/owner/repo`.
+    pub github: Option<String>,
+}
+
+/// Where the branch left the main branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Base {
+    /// The main branch, such as `main` or `origin/main`.
+    pub name: String,
+    /// The short SHA of the merge-base.
+    pub short_sha: String,
 }
 
 /// One commit of the history.
@@ -50,10 +64,12 @@ impl Review {
         let unstaged = self.differs(&[])? || self.has_untracked()?;
         let mut history = History {
             branch: None,
+            base: None,
             uncommitted,
             staged,
             unstaged,
             commits: Vec::new(),
+            github: self.github()?,
         };
         let Some(head) = head else {
             return Ok(history);
@@ -63,6 +79,7 @@ impl Review {
             history.commits = self.log(&[&format!("{branch_base}..{head}")])?;
             if !history.commits.is_empty() {
                 history.branch = Some(self.branch_name()?);
+                history.base = Some(self.base(&branch_base)?);
                 return Ok(history);
             }
         }
@@ -110,6 +127,29 @@ impl Review {
                 })
             })
             .collect())
+    }
+
+    /// The main branch by the name it is best known by, and the short SHA of `merge_base`.
+    fn base(&self, merge_base: &str) -> Result<Base, Error> {
+        let main = self.main_branch()?.unwrap_or_default();
+        // origin/HEAD is better known by the branch it points at, such as origin/main. abbrev-ref prints nothing
+        // before the `--` for a revision that is not a ref, and fails when the name is ambiguous.
+        let abbrev = run_with(
+            self.dir(),
+            &["rev-parse", "--abbrev-ref", &main, "--"],
+            &[0, 128],
+        )?;
+        let name = String::from_utf8_lossy(&abbrev)
+            .lines()
+            .next()
+            .map(str::trim)
+            .filter(|name| !name.is_empty() && *name != "--")
+            .map_or(main.clone(), str::to_owned);
+        let short = run(self.dir(), &["rev-parse", "--short", merge_base])?;
+        Ok(Base {
+            name,
+            short_sha: String::from_utf8_lossy(&short).trim().to_owned(),
+        })
     }
 
     /// The current branch's short name, or the short SHA of a detached `HEAD`.
@@ -165,6 +205,8 @@ mod tests {
         let history = Review::new(tmp.path()).history().unwrap();
 
         assert_eq!(history.branch, None);
+        assert_eq!(history.base, None);
+        assert_eq!(history.github, None);
         assert_eq!(subjects(&history), ["second", "first"]);
         let head = &history.commits[0];
         assert_eq!(head.sha, git(tmp.path(), &["rev-parse", "HEAD"]).trim());
@@ -183,6 +225,43 @@ mod tests {
 
         assert_eq!(history.branch.as_deref(), Some("feature"));
         assert_eq!(subjects(&history), ["fourth", "third"]);
+        let base = history.base.unwrap();
+        assert_eq!(base.name, "main");
+        let main = git(tmp.path(), &["rev-parse", "main"]);
+        assert!(main.starts_with(&base.short_sha));
+    }
+
+    #[test]
+    fn names_origin_head_by_the_branch_it_points_at() {
+        let tmp = repo();
+        git(
+            tmp.path(),
+            &["update-ref", "refs/remotes/origin/main", "main"],
+        );
+        git(
+            tmp.path(),
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+        git(tmp.path(), &["checkout", "--quiet", "-b", "feature"]);
+        commit(tmp.path(), "a.txt", "a2\n", "third");
+
+        let history = Review::new(tmp.path()).history().unwrap();
+
+        assert_eq!(history.base.unwrap().name, "origin/main");
+    }
+
+    #[test]
+    fn a_base_given_by_its_sha_keeps_the_sha() {
+        let tmp = repo();
+        let first = git(tmp.path(), &["rev-parse", "HEAD~1"]).trim().to_owned();
+
+        let history = Review::new(tmp.path()).with_main(&first).history().unwrap();
+
+        assert_eq!(history.base.unwrap().name, first);
     }
 
     #[test]

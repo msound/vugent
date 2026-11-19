@@ -75,10 +75,20 @@ export interface Commit {
   subject: string;
 }
 
-/** What can be reviewed, from ADR 0005 and ADR 0006. */
+/** Where the branch left the main branch. */
+export interface Base {
+  /** The main branch, such as `main` or `origin/main`. */
+  name: string;
+  /** The short SHA of the merge-base. */
+  shortSha: string;
+}
+
+/** What can be reviewed, from ADR 0005, ADR 0006 and ADR 0007. */
 export interface History {
   /** The branch's name, or null when there is no branch review. */
   branch: string | null;
+  /** What the branch is compared against; null exactly when `branch` is. */
+  base: Base | null;
   /** Something in the reviewed folder is uncommitted. */
   uncommitted: boolean;
   /** Something in the reviewed folder is staged. */
@@ -87,6 +97,34 @@ export interface History {
   unstaged: boolean;
   /** Newest first: the branch's commits, or recent ones when there is no branch. */
   commits: Commit[];
+  /** The repository's web address when `origin` is on GitHub, such as `https://github.com/owner/repo`. */
+  github: string | null;
+}
+
+/** Who wrote or committed a commit, and when. */
+export interface Signature {
+  name: string;
+  email: string;
+  /** Strict ISO 8601, with the committer's offset from UTC. */
+  date: string;
+}
+
+/** A trailer at the end of a commit message, such as `Closes: #25`. */
+export interface Trailer {
+  key: string;
+  value: string;
+}
+
+/** Everything the detail page of ADR 0007 shows about a commit. */
+export interface CommitDetails {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  /** The message after the subject, without the trailers. */
+  body: string;
+  trailers: Trailer[];
+  author: Signature;
+  committer: Signature;
 }
 
 /**
@@ -118,4 +156,9 @@ export function fetchTree(rev: Rev): Promise<FolderNode> {
 export function fetchDiff(path: string, rev: Rev): Promise<FileDiff> {
   const query = new URLSearchParams({ path, rev });
   return getJson(`/api/diff?${query}`);
+}
+
+/** A commit's message, trailers, author and committer, by its full SHA. */
+export function fetchCommit(sha: string): Promise<CommitDetails> {
+  return getJson(`/api/commit?rev=${encodeURIComponent(sha)}`);
 }

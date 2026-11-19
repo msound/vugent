@@ -28,6 +28,7 @@ pub fn router(review: Review) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/commits", get(commits))
+        .route("/api/commit", get(commit))
         .route("/api/tree", get(tree))
         .route("/api/diff", get(diff))
         .fallback(frontend)
@@ -49,6 +50,30 @@ async fn health() -> &'static str {
 async fn commits(State(review): State<Arc<Review>>) -> Response {
     let result = tokio::task::spawn_blocking(move || review.history()).await;
     json_response(result)
+}
+
+#[derive(Debug, Deserialize)]
+struct CommitQuery {
+    rev: String,
+}
+
+/// `GET /api/commit?rev=<sha>`: a commit's message, trailers, author and committer, for the detail page. Only a full
+/// SHA is taken, so the answer never changes and the browser may keep it.
+async fn commit(State(review): State<Arc<Review>>, Query(query): Query<CommitQuery>) -> Response {
+    let sha = query.rev;
+    let full = matches!(sha.len(), 40 | 64)
+        && sha
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !full {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("{sha:?} is not a commit's full SHA"),
+        )
+            .into_response();
+    }
+    let result = tokio::task::spawn_blocking(move || review.commit_details(&sha)).await;
+    cached_json_response(result, "private, max-age=31536000, immutable")
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,9 +132,17 @@ fn parse_rev(rev: Option<&str>) -> Result<Rev, String> {
 fn json_response<T: serde::Serialize>(
     result: Result<Result<T, vugent_git::Error>, tokio::task::JoinError>,
 ) -> Response {
+    cached_json_response(result, "no-store")
+}
+
+/// Answers with `result` as JSON, cached as `cache` says, or with the error as plain text, never cached.
+fn cached_json_response<T: serde::Serialize>(
+    result: Result<Result<T, vugent_git::Error>, tokio::task::JoinError>,
+    cache: &'static str,
+) -> Response {
     let error = match result {
         Ok(Ok(value)) => {
-            return ([(header::CACHE_CONTROL, "no-store")], Json(value)).into_response();
+            return ([(header::CACHE_CONTROL, cache)], Json(value)).into_response();
         }
         Ok(Err(error)) => error,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -118,7 +151,12 @@ fn json_response<T: serde::Serialize>(
         vugent_git::Error::NotFound(_) => StatusCode::NOT_FOUND,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
-    (status, error_message(&error)).into_response()
+    (
+        status,
+        [(header::CACHE_CONTROL, "no-store")],
+        error_message(&error),
+    )
+        .into_response()
 }
 
 /// The error with its causes, such as "cannot read x: permission denied".
@@ -320,6 +358,49 @@ mod tests {
         assert_eq!(history["unstaged"], true);
         assert_eq!(history["commits"][0]["subject"], "init");
         assert!(history["commits"][0]["shortSha"].is_string());
+        assert!(history["base"].is_null());
+        assert!(history["github"].is_null());
+    }
+
+    fn head(dir: &std::path::Path) -> String {
+        let sha = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout;
+        String::from_utf8(sha).unwrap().trim().to_owned()
+    }
+
+    #[tokio::test]
+    async fn commit_returns_the_details_and_may_be_cached() {
+        let tmp = repo();
+        let sha = head(tmp.path());
+
+        let response = get_in(tmp.path(), &format!("/api/commit?rev={sha}")).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(header_of(&response, header::CACHE_CONTROL).contains("immutable"));
+        let details = json(response).await;
+        assert_eq!(details["sha"], sha.as_str());
+        assert_eq!(details["subject"], "init");
+        assert_eq!(details["author"]["name"], "Test");
+        assert!(details["trailers"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn commit_takes_only_a_full_sha() {
+        let tmp = repo();
+        let sha = head(tmp.path());
+
+        for rev in [&sha[..7], "HEAD", "worktree", &sha.to_uppercase()] {
+            let response = get_in(tmp.path(), &format!("/api/commit?rev={rev}")).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{rev}");
+        }
+        let unknown = get_in(tmp.path(), &format!("/api/commit?rev={}", "0".repeat(40))).await;
+        assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+        assert_eq!(header_of(&unknown, header::CACHE_CONTROL), "no-store");
     }
 
     #[tokio::test]
