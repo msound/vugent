@@ -7,6 +7,8 @@ ignore_merge_commits = true
 
 pre_bump_hooks = [
   "cargo set-version {{version}}",
+  # cog's built-in changelog footer has no trailing newline
+  "[ -z \"$(tail -c 1 CHANGELOG.md)\" ] || echo >> CHANGELOG.md",
   "git add :/Cargo.lock",
 ]
 
