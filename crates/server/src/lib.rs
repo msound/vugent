@@ -13,7 +13,7 @@ use axum::{Json, Router};
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use tokio::net::TcpListener;
-use vugent_git::Review;
+use vugent_git::{Rev, Review};
 
 /// The built frontend, which `npm run build` in `web/` writes to this crate's `frontend/` folder. In debug builds
 /// rust-embed reads it from disk at run time; in release builds it is compiled in. It may be missing when the frontend
@@ -47,7 +47,7 @@ async fn health() -> &'static str {
 /// `GET /api/tree`: every folder and file of the review, with how each file changed.
 async fn tree(State(review): State<Arc<Review>>) -> Response {
     let result = tokio::task::spawn_blocking(move || {
-        let files = review.files()?;
+        let files = review.files(&Rev::WorkTree)?;
         let name = review
             .dir()
             .file_name()
@@ -66,7 +66,8 @@ struct DiffQuery {
 
 /// `GET /api/diff?path=<path>`: the diff of one file of the review.
 async fn diff(State(review): State<Arc<Review>>, Query(query): Query<DiffQuery>) -> Response {
-    let result = tokio::task::spawn_blocking(move || review.diff(&query.path)).await;
+    let result =
+        tokio::task::spawn_blocking(move || review.diff(&Rev::WorkTree, &query.path)).await;
     json_response(result)
 }
 

@@ -1,6 +1,7 @@
 //! Runs the `git` CLI and parses its output.
 
 mod diff;
+mod history;
 mod review;
 
 use std::io;
@@ -8,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub use diff::{FileDiff, Hunk, Line, LineKind};
-pub use review::{FileEntry, Review, Status};
+pub use history::{Commit, History};
+pub use review::{FileEntry, Rev, Review, Status};
 
 /// An error from running git.
 #[derive(Debug, thiserror::Error)]
@@ -56,6 +58,11 @@ pub fn repo_root(path: &Path) -> Result<PathBuf, Error> {
 
 /// Runs `git -C <dir> <args>` and returns its stdout, failing unless git exits with one of `ok_codes`.
 fn run_with(dir: &Path, args: &[&str], ok_codes: &[i32]) -> Result<Vec<u8>, Error> {
+    run_code(dir, args, ok_codes).map(|(_, stdout)| stdout)
+}
+
+/// Runs `git -C <dir> <args>` and returns its exit code and stdout, failing unless the code is one of `ok_codes`.
+fn run_code(dir: &Path, args: &[&str], ok_codes: &[i32]) -> Result<(i32, Vec<u8>), Error> {
     let output = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -64,17 +71,13 @@ fn run_with(dir: &Path, args: &[&str], ok_codes: &[i32]) -> Result<Vec<u8>, Erro
         .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
         .map_err(Error::Spawn)?;
-    if !output
-        .status
-        .code()
-        .is_some_and(|code| ok_codes.contains(&code))
-    {
-        return Err(Error::Failed {
+    match output.status.code() {
+        Some(code) if ok_codes.contains(&code) => Ok((code, output.stdout)),
+        _ => Err(Error::Failed {
             args: args.join(" "),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
+        }),
     }
-    Ok(output.stdout)
 }
 
 /// Runs `git -C <dir> <args>` and returns its stdout.

@@ -69,9 +69,9 @@ pub enum Shade {
 struct Counts {
     added: u64,
     removed: u64,
-    /// Lines in `HEAD`.
+    /// Lines in the base of the review.
     old: u64,
-    /// Lines in the working tree.
+    /// Lines in the target of the review.
     new: u64,
 }
 
@@ -249,7 +249,7 @@ mod tests {
         }
     }
 
-    /// A file with the given counts, `new` being its line count in the working tree.
+    /// A file with the given counts, `new` being its line count in the target.
     fn counted(path: &str, status: Status, added: u32, removed: u32, new: u32) -> FileEntry {
         FileEntry {
             status,

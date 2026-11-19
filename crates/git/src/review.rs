@@ -1,4 +1,5 @@
-//! The review from ADR 0002: every uncommitted change in a folder, untracked files included, compared against `HEAD`.
+//! Reviews of one folder of a repository, each a (base, target) pair from ADR 0002 and ADR 0005: uncommitted
+//! changes, staged changes, a whole branch, or a single commit.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{ErrorKind, Read};
@@ -39,25 +40,99 @@ pub struct FileEntry {
     pub submodule: bool,
     /// Not tracked by git yet.
     pub untracked: bool,
-    /// Lines in the working tree, counted the way git does: 0 for a deleted file, and 1 for a binary file, a symbolic
-    /// link or a submodule.
+    /// Lines in the target of the review, counted the way git does: 0 for a deleted file, and 1 for a binary file, a
+    /// symbolic link or a submodule.
     pub lines: u32,
+}
+
+/// Which review to show, as named in the API's `rev` parameter.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Rev {
+    /// Every uncommitted change, untracked files included, against `HEAD`.
+    #[default]
+    WorkTree,
+    /// The staged changes: the index against `HEAD`.
+    Index,
+    /// Everything since the branch left the main branch: the working tree against the merge-base.
+    Branch,
+    /// A single commit against its first parent, given by its SHA.
+    Commit(String),
+}
+
+impl Rev {
+    /// Reads `worktree`, `index`, `branch` or a commit's SHA in lowercase hex. Anything else is refused, so that no
+    /// other text ever reaches git as a revision.
+    pub fn parse(rev: &str) -> Option<Self> {
+        match rev {
+            "worktree" => Some(Self::WorkTree),
+            "index" => Some(Self::Index),
+            "branch" => Some(Self::Branch),
+            _ if (4..=64).contains(&rev.len())
+                && rev
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
+            {
+                Some(Self::Commit(rev.to_owned()))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// What a review compares the base against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Target {
+    WorkTree,
+    Index,
+    Commit(String),
+}
+
+/// A review resolved to concrete objects: `base` is a commit or the empty tree.
+#[derive(Debug, Clone)]
+struct Comparison {
+    base: String,
+    target: Target,
+}
+
+impl Comparison {
+    /// The revision arguments of `git diff` that compare `base` against the target.
+    fn range<'a>(&'a self, base: &'a str) -> Vec<&'a str> {
+        match &self.target {
+            Target::WorkTree => vec![base],
+            Target::Index => vec!["--cached", base],
+            Target::Commit(commit) => vec![base, commit],
+        }
+    }
 }
 
 /// git looks for a NUL byte in this many leading bytes to decide whether a file is binary.
 const BINARY_PROBE: usize = 8000;
 
-/// A review of the uncommitted changes in one folder of a repository. Every call runs git again, so the result is
-/// always current. A review never writes to the index or the working tree.
+/// The branches tried, in order, when looking for the main branch.
+const MAIN_BRANCHES: [&str; 3] = ["origin/HEAD", "main", "master"];
+
+/// Reviews of one folder of a repository. Every call runs git again, so the result is always current. A review never
+/// writes to the index or the working tree.
 #[derive(Debug, Clone)]
 pub struct Review {
     dir: PathBuf,
+    /// The main branch given by the user, instead of looking for one.
+    main: Option<String>,
 }
 
 impl Review {
     /// Reviews `dir`, which must be inside a git working tree. Only files under `dir` are included.
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self {
+            dir: dir.into(),
+            main: None,
+        }
+    }
+
+    /// Compares the branch against `main` instead of the first of `origin/HEAD`, `main` and `master` that exists.
+    pub fn with_main(mut self, main: impl Into<String>) -> Self {
+        self.main = Some(main.into());
+        self
     }
 
     /// The reviewed folder.
@@ -65,14 +140,35 @@ impl Review {
         &self.dir
     }
 
-    /// Lists every file under the reviewed folder: tracked, untracked (but not ignored) and deleted, sorted by path.
-    pub fn files(&self) -> Result<Vec<FileEntry>, Error> {
-        let base = self.base()?;
+    /// The main branch that branch review compares against, or `None` when there is none.
+    pub fn main_branch(&self) -> Result<Option<String>, Error> {
+        let candidates = match &self.main {
+            Some(main) => vec![main.as_str()],
+            None => MAIN_BRANCHES.to_vec(),
+        };
+        for candidate in candidates {
+            // A leading dash would be read as an option.
+            if !candidate.starts_with('-') && self.commit(candidate)?.is_some() {
+                return Ok(Some(candidate.to_owned()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Lists every file under the reviewed folder in the target of `rev`, plus the files deleted since its base,
+    /// sorted by path. Untracked (but not ignored) files are included when the target is the working tree.
+    pub fn files(&self, rev: &Rev) -> Result<Vec<FileEntry>, Error> {
+        let comparison = self.compare(rev)?;
         let mut files = BTreeMap::new();
 
-        let staged = run(&self.dir, &["ls-files", "--stage", "-z", "--", "."])?;
-        for record in split_z(&staged) {
-            // <mode> <object> <stage>\t<path>
+        let listing = match &comparison.target {
+            Target::Commit(commit) => run(&self.dir, &["ls-tree", "-r", "-z", commit, "--", "."])?,
+            Target::WorkTree | Target::Index => {
+                run(&self.dir, &["ls-files", "--stage", "-z", "--", "."])?
+            }
+        };
+        for record in split_z(&listing) {
+            // ls-files: <mode> <object> <stage>\t<path>; ls-tree: <mode> <type> <object>\t<path>
             let Some((meta, path)) = record.split_once('\t') else {
                 continue;
             };
@@ -80,20 +176,12 @@ impl Review {
             files.insert(path.to_owned(), unchanged(path, submodule));
         }
 
-        let counts = self.numstat(&base)?;
-        let names = run(
-            &self.dir,
-            &[
-                "diff",
-                &base,
-                "-M",
-                "--name-status",
-                "-z",
-                "--relative",
-                "--",
-                ".",
-            ],
-        )?;
+        let range = comparison.range(&comparison.base);
+        let counts = self.numstat(&range, true)?;
+        let mut args = vec!["diff"];
+        args.extend(&range);
+        args.extend(["-M", "--name-status", "-z", "--relative", "--", "."]);
+        let names = run(&self.dir, &args)?;
         let mut names = split_z(&names).into_iter();
         while let Some(code) = names.next() {
             let (status, old_path) = match code.as_bytes().first() {
@@ -123,62 +211,36 @@ impl Review {
                 .map(str::to_owned);
         }
 
-        let others = run(
-            &self.dir,
-            &[
-                "ls-files",
-                "--others",
-                "--exclude-standard",
-                "-z",
-                "--",
-                ".",
-            ],
-        )?;
-        for path in split_z(&others) {
-            let entry = match path.strip_suffix('/') {
-                // git lists an untracked nested repository as a folder and does not look inside it.
-                Some(repo) => FileEntry {
-                    status: Status::Added,
-                    untracked: true,
-                    lines: 1,
-                    ..unchanged(repo, true)
-                },
-                None => {
-                    let (lines, binary) = count_lines(&self.dir.join(path))?;
-                    FileEntry {
-                        status: Status::Added,
-                        added: lines,
-                        binary,
-                        untracked: true,
-                        lines: if binary { 1 } else { lines },
-                        ..unchanged(path, false)
-                    }
-                }
-            };
-            files.insert(entry.path.clone(), entry);
-        }
-
-        for entry in files.values_mut().filter(|entry| !entry.untracked) {
-            entry.lines = match entry.status {
-                Status::Deleted => 0,
-                _ if entry.submodule || entry.binary => 1,
-                _ => match count_lines(&self.dir.join(&entry.path)) {
-                    Ok((_, true)) => 1,
-                    Ok((lines, false)) => lines,
-                    // Added to the index and then deleted: git shows no change against HEAD.
-                    Err(Error::Read { source, .. }) if source.kind() == ErrorKind::NotFound => 0,
-                    Err(err) => return Err(err),
-                },
-            };
+        if comparison.target == Target::WorkTree {
+            for entry in self.untracked()? {
+                files.insert(entry.path.clone(), entry);
+            }
+            self.count_work_tree_lines(&mut files)?;
+        } else {
+            // Diffing the empty tree against the target lists every file as added, with all of its lines.
+            let empty = self.empty_tree()?;
+            let lines = self.numstat(&comparison.range(&empty), false)?;
+            for entry in files.values_mut() {
+                entry.lines = match entry.status {
+                    Status::Deleted => 0,
+                    _ if entry.submodule || entry.binary => 1,
+                    _ => match lines.get(&entry.path) {
+                        Some(&(_, _, true)) => 1,
+                        Some(&(added, _, false)) => added,
+                        None => 0,
+                    },
+                };
+            }
         }
 
         Ok(files.into_values().collect())
     }
 
-    /// Returns the diff of one file of the review, given its path relative to the reviewed folder.
-    pub fn diff(&self, path: &str) -> Result<FileDiff, Error> {
+    /// Returns the diff of one file of the review `rev`, given its path relative to the reviewed folder.
+    pub fn diff(&self, rev: &Rev, path: &str) -> Result<FileDiff, Error> {
+        let comparison = self.compare(rev)?;
         let entry = self
-            .files()?
+            .files(rev)?
             .into_iter()
             .find(|entry| entry.path == path)
             .ok_or_else(|| Error::NotFound(path.to_owned()))?;
@@ -189,7 +251,12 @@ impl Review {
 
         let output = match entry.status {
             Status::Unchanged => {
-                let content = read(&self.dir.join(path))?;
+                let content = match &comparison.target {
+                    Target::WorkTree => read(&self.dir.join(path))?,
+                    // A path starting with ./ is relative to the reviewed folder, not the repository's root.
+                    Target::Index => self.blob(&format!(":./{path}"))?,
+                    Target::Commit(commit) => self.blob(&format!("{commit}:./{path}"))?,
+                };
                 diff.binary = is_binary(&content);
                 if !diff.binary {
                     diff.hunks = diff::unchanged(&content);
@@ -212,17 +279,16 @@ impl Review {
                 &[0, 1],
             )?,
             _ => {
-                let base = self.base()?;
-                let mut args = vec![
-                    "diff",
-                    &base,
+                let mut args = vec!["diff"];
+                args.extend(comparison.range(&comparison.base));
+                args.extend([
                     "-M",
                     "--no-color",
                     "--no-ext-diff",
                     "--no-textconv",
                     "--relative",
                     "--",
-                ];
+                ]);
                 args.extend(entry.old_path.as_deref());
                 args.push(path);
                 run(&self.dir, &args)?
@@ -234,38 +300,164 @@ impl Review {
         Ok(diff)
     }
 
-    /// The commit to compare against: `HEAD`, or the empty tree on a branch with no commits yet.
-    fn base(&self) -> Result<String, Error> {
-        // --verify --quiet exits with 1 and no message when HEAD does not exist yet, and 128 outside a repository.
-        let head = run_with(
+    /// Resolves `rev` to the objects it compares.
+    fn compare(&self, rev: &Rev) -> Result<Comparison, Error> {
+        let head = || -> Result<String, Error> {
+            match self.commit("HEAD")? {
+                Some(head) => Ok(head),
+                None => self.empty_tree(),
+            }
+        };
+        Ok(match rev {
+            Rev::WorkTree => Comparison {
+                base: head()?,
+                target: Target::WorkTree,
+            },
+            Rev::Index => Comparison {
+                base: head()?,
+                target: Target::Index,
+            },
+            Rev::Branch => Comparison {
+                base: self
+                    .branch_base()?
+                    .ok_or_else(|| Error::NotFound("the branch".to_owned()))?,
+                target: Target::WorkTree,
+            },
+            Rev::Commit(sha) => {
+                let commit = self
+                    .commit(sha)?
+                    .ok_or_else(|| Error::NotFound(format!("commit {sha}")))?;
+                let base = match self.commit(&format!("{commit}^1"))? {
+                    Some(parent) => parent,
+                    // The repository's first commit.
+                    None => self.empty_tree()?,
+                };
+                Comparison {
+                    base,
+                    target: Target::Commit(commit),
+                }
+            }
+        })
+    }
+
+    /// The full SHA of the commit that `rev` names, or `None` when there is no such commit.
+    pub(crate) fn commit(&self, rev: &str) -> Result<Option<String>, Error> {
+        // --verify --quiet exits with 1 and no message when the revision does not exist, and 128 outside a
+        // repository.
+        let out = run_with(
             &self.dir,
-            &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{rev}^{{commit}}"),
+            ],
             &[0, 1],
         )?;
-        let head = String::from_utf8_lossy(&head).trim().to_owned();
-        if !head.is_empty() {
-            return Ok(head);
-        }
+        let sha = String::from_utf8_lossy(&out).trim().to_owned();
+        Ok(Some(sha).filter(|sha| !sha.is_empty()))
+    }
+
+    /// Where the current branch left the main branch, or `None` when there is no main branch, no common history, or
+    /// `HEAD` is on the main branch itself.
+    pub(crate) fn branch_base(&self) -> Result<Option<String>, Error> {
+        let (Some(head), Some(main)) = (self.commit("HEAD")?, self.main_branch()?) else {
+            return Ok(None);
+        };
+        // merge-base exits with 1 when the two have no common history.
+        let out = run_with(&self.dir, &["merge-base", &head, &main], &[0, 1])?;
+        let base = String::from_utf8_lossy(&out).trim().to_owned();
+        Ok(Some(base).filter(|base| !base.is_empty() && *base != head))
+    }
+
+    /// The empty tree, the base when there is no commit to compare against.
+    pub(crate) fn empty_tree(&self) -> Result<String, Error> {
         // Hashing without -w writes nothing. Its stdin is empty, which is the empty tree, in SHA-1 and SHA-256 repos.
         let empty = run(&self.dir, &["hash-object", "-t", "tree", "--stdin"])?;
         Ok(String::from_utf8_lossy(&empty).trim().to_owned())
     }
 
-    /// Line counts of changed tracked files, keyed by their path: (added, removed, binary).
-    fn numstat(&self, base: &str) -> Result<HashMap<String, (u32, u32, bool)>, Error> {
-        let out = run(
+    /// Untracked files that are not ignored, each shown as added.
+    fn untracked(&self) -> Result<Vec<FileEntry>, Error> {
+        let others = run(
             &self.dir,
             &[
-                "diff",
-                base,
-                "-M",
-                "--numstat",
+                "ls-files",
+                "--others",
+                "--exclude-standard",
                 "-z",
-                "--relative",
                 "--",
                 ".",
             ],
         )?;
+        split_z(&others)
+            .into_iter()
+            .map(|path| {
+                Ok(match path.strip_suffix('/') {
+                    // git lists an untracked nested repository as a folder and does not look inside it.
+                    Some(repo) => FileEntry {
+                        status: Status::Added,
+                        untracked: true,
+                        lines: 1,
+                        ..unchanged(repo, true)
+                    },
+                    None => {
+                        let (lines, binary) = count_lines(&self.dir.join(path))?;
+                        FileEntry {
+                            status: Status::Added,
+                            added: lines,
+                            binary,
+                            untracked: true,
+                            lines: if binary { 1 } else { lines },
+                            ..unchanged(path, false)
+                        }
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Counts the lines of every tracked file in the working tree. Untracked files are counted when they are listed.
+    fn count_work_tree_lines(&self, files: &mut BTreeMap<String, FileEntry>) -> Result<(), Error> {
+        for entry in files.values_mut().filter(|entry| !entry.untracked) {
+            entry.lines = match entry.status {
+                Status::Deleted => 0,
+                _ if entry.submodule || entry.binary => 1,
+                _ => match count_lines(&self.dir.join(&entry.path)) {
+                    Ok((_, true)) => 1,
+                    Ok((lines, false)) => lines,
+                    // Added to the index and then deleted: git shows no change against HEAD.
+                    Err(Error::Read { source, .. }) if source.kind() == ErrorKind::NotFound => 0,
+                    Err(err) => return Err(err),
+                },
+            };
+        }
+        Ok(())
+    }
+
+    /// The content of a blob, such as `:./src/lib.rs` in the index or `<commit>:./src/lib.rs`.
+    fn blob(&self, object: &str) -> Result<Vec<u8>, Error> {
+        run(&self.dir, &["cat-file", "blob", object])
+    }
+
+    /// Line counts of changed tracked files between the revisions of `range`, keyed by their path:
+    /// (added, removed, binary).
+    fn numstat(
+        &self,
+        range: &[&str],
+        renames: bool,
+    ) -> Result<HashMap<String, (u32, u32, bool)>, Error> {
+        let mut args = vec!["diff"];
+        args.extend(range);
+        args.extend([
+            if renames { "-M" } else { "--no-renames" },
+            "--numstat",
+            "-z",
+            "--relative",
+            "--",
+            ".",
+        ]);
+        let out = run(&self.dir, &args)?;
         let mut counts = HashMap::new();
         let mut records = split_z(&out).into_iter();
         while let Some(record) = records.next() {
@@ -314,7 +506,7 @@ fn unchanged(path: &str, submodule: bool) -> FileEntry {
 }
 
 /// Splits NUL-terminated output, as printed by git's `-z` options, into its records.
-fn split_z(out: &[u8]) -> Vec<&str> {
+pub(crate) fn split_z(out: &[u8]) -> Vec<&str> {
     out.split(|&byte| byte == 0)
         .filter(|record| !record.is_empty())
         .map(|record| std::str::from_utf8(record).unwrap_or_default())
@@ -402,7 +594,7 @@ mod tests {
     fn a_clean_repo_lists_every_file_as_unchanged() {
         let tmp = repo();
 
-        let files = Review::new(tmp.path()).files().unwrap();
+        let files = Review::new(tmp.path()).files(&Rev::WorkTree).unwrap();
 
         let paths: Vec<_> = files.iter().map(|entry| entry.path.as_str()).collect();
         assert_eq!(paths, ["a.txt", "src/lib.rs", "src/old.rs"]);
@@ -423,7 +615,7 @@ mod tests {
         write(dir, "ignored.log", b"noise\n");
         write(dir, ".gitignore", b"*.log\n");
 
-        let files = Review::new(dir).files().unwrap();
+        let files = Review::new(dir).files(&Rev::WorkTree).unwrap();
 
         let a = find(&files, "a.txt");
         assert_eq!(
@@ -459,7 +651,7 @@ mod tests {
         git(dir, &["add", "gone.txt"]);
         std::fs::remove_file(dir.join("gone.txt")).unwrap();
 
-        let files = Review::new(dir).files().unwrap();
+        let files = Review::new(dir).files(&Rev::WorkTree).unwrap();
 
         let lines = |path| find(&files, path).lines;
         assert_eq!(lines("a.txt"), 2);
@@ -478,7 +670,7 @@ mod tests {
         git(tmp.path(), &["commit", "--quiet", "-m", "blob"]);
         write(tmp.path(), "blob.bin", b"\0b");
 
-        let files = Review::new(tmp.path()).files().unwrap();
+        let files = Review::new(tmp.path()).files(&Rev::WorkTree).unwrap();
 
         let blob = find(&files, "blob.bin");
         assert_eq!(
@@ -493,7 +685,9 @@ mod tests {
         write(tmp.path(), "a.txt", b"changed\n");
         write(tmp.path(), "src/extra.rs", b"\n");
 
-        let files = Review::new(tmp.path().join("src")).files().unwrap();
+        let files = Review::new(tmp.path().join("src"))
+            .files(&Rev::WorkTree)
+            .unwrap();
 
         let paths: Vec<_> = files.iter().map(|entry| entry.path.as_str()).collect();
         assert_eq!(paths, ["extra.rs", "lib.rs", "old.rs"]);
@@ -508,11 +702,11 @@ mod tests {
         write(tmp.path(), "loose.txt", b"l\n");
 
         let review = Review::new(tmp.path());
-        let files = review.files().unwrap();
+        let files = review.files(&Rev::WorkTree).unwrap();
 
         assert_eq!(files.len(), 2);
         assert!(files.iter().all(|entry| entry.status == Status::Added));
-        let diff = review.diff("staged.txt").unwrap();
+        let diff = review.diff(&Rev::WorkTree, "staged.txt").unwrap();
         assert_eq!(kinds(&diff), [(LineKind::Added, "s")]);
     }
 
@@ -522,7 +716,7 @@ mod tests {
         git(tmp.path(), &["checkout", "--quiet", "--detach"]);
         write(tmp.path(), "a.txt", b"one\n");
 
-        let files = Review::new(tmp.path()).files().unwrap();
+        let files = Review::new(tmp.path()).files(&Rev::WorkTree).unwrap();
 
         assert_eq!(find(&files, "a.txt").status, Status::Modified);
     }
@@ -545,7 +739,7 @@ mod tests {
         write(&nested, "inside.txt", b"hidden\n");
 
         let review = Review::new(dir);
-        let files = review.files().unwrap();
+        let files = review.files(&Rev::WorkTree).unwrap();
 
         let lib = find(&files, "vendor/lib");
         assert!(lib.submodule && !lib.binary);
@@ -554,7 +748,7 @@ mod tests {
         assert!(nested.submodule && nested.untracked);
         assert_eq!((lib.lines, nested.lines), (1, 1));
         assert!(!files.iter().any(|entry| entry.path.starts_with("nested/")));
-        let diff = review.diff("vendor/lib").unwrap();
+        let diff = review.diff(&Rev::WorkTree, "vendor/lib").unwrap();
         assert!(diff.submodule && diff.hunks.is_empty());
     }
 
@@ -563,7 +757,9 @@ mod tests {
         let tmp = repo();
         write(tmp.path(), "a.txt", b"one\n2\nthree\n");
 
-        let diff = Review::new(tmp.path()).diff("a.txt").unwrap();
+        let diff = Review::new(tmp.path())
+            .diff(&Rev::WorkTree, "a.txt")
+            .unwrap();
 
         assert_eq!(diff.status, Status::Modified);
         assert!(!diff.binary);
@@ -589,8 +785,8 @@ mod tests {
         std::fs::remove_file(tmp.path().join("a.txt")).unwrap();
         let review = Review::new(tmp.path());
 
-        let added = review.diff("src/new.txt").unwrap();
-        let deleted = review.diff("a.txt").unwrap();
+        let added = review.diff(&Rev::WorkTree, "src/new.txt").unwrap();
+        let deleted = review.diff(&Rev::WorkTree, "a.txt").unwrap();
 
         assert_eq!(
             kinds(&added),
@@ -616,7 +812,9 @@ mod tests {
             b"// a file long enough\n// to be found\n// as renamed!\n",
         );
 
-        let diff = Review::new(tmp.path()).diff("src/new.rs").unwrap();
+        let diff = Review::new(tmp.path())
+            .diff(&Rev::WorkTree, "src/new.rs")
+            .unwrap();
 
         assert_eq!(diff.status, Status::Renamed);
         assert_eq!(diff.old_path.as_deref(), Some("src/old.rs"));
@@ -636,7 +834,9 @@ mod tests {
         let tmp = repo();
         write(tmp.path(), "image.bin", b"\0\x01");
 
-        let diff = Review::new(tmp.path()).diff("image.bin").unwrap();
+        let diff = Review::new(tmp.path())
+            .diff(&Rev::WorkTree, "image.bin")
+            .unwrap();
 
         assert!(diff.binary);
         assert!(diff.hunks.is_empty());
@@ -646,7 +846,9 @@ mod tests {
     fn unchanged_files_are_shown_as_context() {
         let tmp = repo();
 
-        let diff = Review::new(tmp.path().join("src")).diff("lib.rs").unwrap();
+        let diff = Review::new(tmp.path().join("src"))
+            .diff(&Rev::WorkTree, "lib.rs")
+            .unwrap();
 
         assert_eq!(kinds(&diff), [(LineKind::Context, "fn main() {}")]);
     }
@@ -656,7 +858,7 @@ mod tests {
         let tmp = repo();
 
         let err = Review::new(tmp.path().join("src"))
-            .diff("../a.txt")
+            .diff(&Rev::WorkTree, "../a.txt")
             .unwrap_err();
 
         assert!(matches!(err, Error::NotFound(_)), "got {err:?}");
@@ -673,10 +875,177 @@ mod tests {
         let before = std::fs::read(&index).unwrap();
 
         let review = Review::new(tmp.path());
-        review.files().unwrap();
-        review.diff("a.txt").unwrap();
-        review.diff("new.txt").unwrap();
+        review.files(&Rev::WorkTree).unwrap();
+        review.diff(&Rev::WorkTree, "a.txt").unwrap();
+        review.diff(&Rev::WorkTree, "new.txt").unwrap();
 
         assert_eq!(std::fs::read(&index).unwrap(), before);
+    }
+
+    fn head(dir: &Path) -> String {
+        git(dir, &["rev-parse", "HEAD"]).trim().to_owned()
+    }
+
+    #[test]
+    fn parses_revs() {
+        assert_eq!(Rev::parse("worktree"), Some(Rev::WorkTree));
+        assert_eq!(Rev::parse("index"), Some(Rev::Index));
+        assert_eq!(Rev::parse("branch"), Some(Rev::Branch));
+        assert_eq!(
+            Rev::parse("0123abcd"),
+            Some(Rev::Commit("0123abcd".to_owned()))
+        );
+        for bad in [
+            "",
+            "HEAD",
+            "abc",
+            "--all",
+            "ABCDEF12",
+            "abc1234^",
+            &"a".repeat(65),
+        ] {
+            assert_eq!(Rev::parse(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_index_shows_only_staged_changes() {
+        let tmp = repo();
+        let dir = tmp.path();
+        write(dir, "a.txt", b"one\ntwo\nthree\nfour\n");
+        git(dir, &["add", "a.txt"]);
+        write(dir, "a.txt", b"one\ntwo\nthree\nfour\nfive\n");
+        write(dir, "src/lib.rs", b"fn main() { }\n");
+        write(dir, "new.txt", b"n\n");
+
+        let review = Review::new(dir);
+        let files = review.files(&Rev::Index).unwrap();
+
+        let a = find(&files, "a.txt");
+        assert_eq!(
+            (a.status, a.added, a.removed, a.lines),
+            (Status::Modified, 1, 0, 4)
+        );
+        assert_eq!(find(&files, "src/lib.rs").status, Status::Unchanged);
+        assert!(!files.iter().any(|entry| entry.path == "new.txt"));
+        let diff = review.diff(&Rev::Index, "a.txt").unwrap();
+        assert_eq!(kinds(&diff).last(), Some(&(LineKind::Added, "four")));
+        let lib = review.diff(&Rev::Index, "src/lib.rs").unwrap();
+        assert_eq!(kinds(&lib), [(LineKind::Context, "fn main() {}")]);
+    }
+
+    #[test]
+    fn a_commit_shows_the_tree_as_it_was_and_only_its_changes() {
+        let tmp = repo();
+        let dir = tmp.path();
+        write(dir, "a.txt", b"one\n2\nthree\n");
+        std::fs::remove_file(dir.join("src/lib.rs")).unwrap();
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "--quiet", "-m", "change"]);
+        let change = head(dir);
+        write(dir, "later.txt", b"later\n");
+        write(dir, "src/old.rs", b"rewritten\n");
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "--quiet", "-m", "later"]);
+        write(dir, "a.txt", b"uncommitted\n");
+
+        let review = Review::new(dir);
+        let rev = Rev::Commit(change);
+        let files = review.files(&rev).unwrap();
+
+        let paths: Vec<_> = files.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt", "src/lib.rs", "src/old.rs"]);
+        let a = find(&files, "a.txt");
+        assert_eq!(
+            (a.status, a.added, a.removed, a.lines),
+            (Status::Modified, 1, 1, 3)
+        );
+        let lib = find(&files, "src/lib.rs");
+        assert_eq!((lib.status, lib.lines), (Status::Deleted, 0));
+        let old = find(&files, "src/old.rs");
+        assert_eq!((old.status, old.lines), (Status::Unchanged, 3));
+        let diff = review.diff(&rev, "src/old.rs").unwrap();
+        assert_eq!(
+            kinds(&diff)[0],
+            (LineKind::Context, "// a file long enough")
+        );
+        let diff = review.diff(&rev, "a.txt").unwrap();
+        assert!(kinds(&diff).contains(&(LineKind::Added, "2")));
+    }
+
+    #[test]
+    fn the_first_commit_is_all_added() {
+        let tmp = repo();
+        let first = head(tmp.path());
+
+        let files = Review::new(tmp.path()).files(&Rev::Commit(first)).unwrap();
+
+        assert!(files.iter().all(|entry| entry.status == Status::Added));
+        assert_eq!(find(&files, "a.txt").added, 3);
+    }
+
+    #[test]
+    fn a_commit_works_in_a_subfolder() {
+        let tmp = repo();
+        let first = head(tmp.path());
+
+        let review = Review::new(tmp.path().join("src"));
+        let files = review.files(&Rev::Commit(first.clone())).unwrap();
+
+        let paths: Vec<_> = files.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, ["lib.rs", "old.rs"]);
+        assert_eq!(find(&files, "lib.rs").lines, 1);
+        let diff = review.diff(&Rev::Commit(first), "lib.rs").unwrap();
+        assert_eq!(kinds(&diff), [(LineKind::Added, "fn main() {}")]);
+    }
+
+    #[test]
+    fn a_merge_commit_is_compared_against_its_first_parent() {
+        let tmp = repo();
+        let dir = tmp.path();
+        git(dir, &["checkout", "--quiet", "-b", "side"]);
+        write(dir, "side.txt", b"s\n");
+        git(dir, &["add", "side.txt"]);
+        git(dir, &["commit", "--quiet", "-m", "side"]);
+        git(dir, &["checkout", "--quiet", "main"]);
+        write(dir, "main.txt", b"m\n");
+        git(dir, &["add", "main.txt"]);
+        git(dir, &["commit", "--quiet", "-m", "main"]);
+        git(dir, &["merge", "--quiet", "--no-ff", "-m", "merge", "side"]);
+
+        let files = Review::new(dir).files(&Rev::Commit(head(dir))).unwrap();
+
+        assert_eq!(find(&files, "side.txt").status, Status::Added);
+        assert_eq!(find(&files, "main.txt").status, Status::Unchanged);
+    }
+
+    #[test]
+    fn an_unknown_commit_is_not_found() {
+        let tmp = repo();
+
+        let err = Review::new(tmp.path())
+            .files(&Rev::Commit("0".repeat(40)))
+            .unwrap_err();
+
+        assert!(matches!(err, Error::NotFound(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn the_branch_spans_its_commits_and_uncommitted_work() {
+        let tmp = repo();
+        let dir = tmp.path();
+        git(dir, &["checkout", "--quiet", "-b", "feature"]);
+        write(dir, "a.txt", b"one\ntwo\nthree\nfour\n");
+        git(dir, &["commit", "--quiet", "-am", "four"]);
+        write(dir, "new.txt", b"n\n");
+
+        let review = Review::new(dir);
+        let files = review.files(&Rev::Branch).unwrap();
+
+        assert_eq!(find(&files, "a.txt").status, Status::Modified);
+        assert_eq!(find(&files, "new.txt").status, Status::Added);
+        git(dir, &["checkout", "--quiet", "main"]);
+        let err = review.files(&Rev::Branch).unwrap_err();
+        assert!(matches!(err, Error::NotFound(_)), "got {err:?}");
     }
 }
