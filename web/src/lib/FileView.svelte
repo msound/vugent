@@ -20,7 +20,8 @@
 </script>
 
 <div
-  class="file {box.status}"
+  class="file change {file.hue} {file.shade}"
+  class:deleted={file.status === 'deleted'}
   style:width="{box.width}px"
   style:height="{box.height}px"
   title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
@@ -38,30 +39,14 @@
     flex-direction: column;
     justify-content: center;
     padding: 0 10px;
-    border: 1.5px solid var(--unchanged-border);
+    border: 1.5px solid var(--change-border);
     border-radius: 6px;
-    background: var(--unchanged-bg);
+    background: var(--change-fill);
     color: var(--text);
     line-height: 1.25;
   }
 
-  .added {
-    border-color: var(--added-border);
-    background: var(--added-bg);
-  }
-
-  .modified,
-  .renamed {
-    border-color: var(--modified-border);
-    background: var(--modified-bg);
-  }
-
-  .deleted {
-    border-color: var(--deleted-border);
-    background: var(--deleted-bg);
-  }
-
-  .deleted .name {
+  .file.deleted .name {
     text-decoration: line-through;
   }
 
@@ -75,7 +60,6 @@
 
   .detail {
     font-size: 13px;
-    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
   }
 </style>

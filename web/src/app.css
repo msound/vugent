@@ -4,7 +4,7 @@
   --bg: #ffffff;
   --canvas: #f6f8fa;
 
-  /* How a file changed; a folder is "modified" if anything inside it changed. */
+  /* How a file changed, for the diff panel. */
   --added-bg: #dafbe1;
   --added-border: #1a7f37;
   --modified-bg: #fff1e5;
@@ -13,6 +13,23 @@
   --deleted-border: #cf222e;
   --unchanged-bg: #ffffff;
   --unchanged-border: #d1d9e0;
+
+  /*
+   * Canvas boxes, from ADR 0004: the border carries the hue, the fill carries the shade (light, medium, dark).
+   * Text keeps a contrast of at least 4.5:1 on every fill.
+   */
+  --green-border: #1a7f37;
+  --green-light: #c2f0cb;
+  --green-medium: #86dc98;
+  --green-dark: #45c164;
+  --red-border: #cf222e;
+  --red-light: #ffd3cf;
+  --red-medium: #ffa29c;
+  --red-dark: #f2645f;
+  --orange-border: #bc4c00;
+  --orange-light: #ffd5ad;
+  --orange-medium: #ffaf66;
+  --orange-dark: #f58a1f;
 
   font:
     16px/1.5 system-ui,
@@ -39,9 +56,77 @@
     --deleted-border: #f85149;
     --unchanged-bg: #151b23;
     --unchanged-border: #3d444d;
+
+    /* Dark means the strongest fill here, not the darkest. */
+    --green-border: #3fb950;
+    --green-light: #173a22;
+    --green-medium: #1f5a2f;
+    --green-dark: #277338;
+    --red-border: #f85149;
+    --red-light: #4a1b1e;
+    --red-medium: #702226;
+    --red-dark: #9c2b31;
+    --orange-border: #db6d28;
+    --orange-light: #4a2a0e;
+    --orange-medium: #6e3e0f;
+    --orange-dark: #995512;
   }
 }
 
 body {
   margin: 0;
+}
+
+/* Maps a box's hue and shade from the server to its colors: `class="change {hue} {shade}"`. */
+.change {
+  --change-border: var(--unchanged-border);
+  --change-fill: var(--unchanged-bg);
+}
+
+.change.green {
+  --change-border: var(--green-border);
+}
+
+.change.red {
+  --change-border: var(--red-border);
+}
+
+.change.orange {
+  --change-border: var(--orange-border);
+}
+
+.change.green.light {
+  --change-fill: var(--green-light);
+}
+
+.change.green.medium {
+  --change-fill: var(--green-medium);
+}
+
+.change.green.dark {
+  --change-fill: var(--green-dark);
+}
+
+.change.red.light {
+  --change-fill: var(--red-light);
+}
+
+.change.red.medium {
+  --change-fill: var(--red-medium);
+}
+
+.change.red.dark {
+  --change-fill: var(--red-dark);
+}
+
+.change.orange.light {
+  --change-fill: var(--orange-light);
+}
+
+.change.orange.medium {
+  --change-fill: var(--orange-medium);
+}
+
+.change.orange.dark {
+  --change-fill: var(--orange-dark);
 }

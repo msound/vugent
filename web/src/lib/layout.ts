@@ -3,7 +3,7 @@
 
 import ELK, { type ElkNode } from 'elkjs/lib/elk-api';
 import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url';
-import type { FileNode, FolderNode, Status, TreeNode } from './api';
+import type { FileNode, FolderNode, TreeNode } from './api';
 
 /** Every file is drawn the same size, in canvas units. */
 export const FILE_WIDTH = 240;
@@ -33,8 +33,7 @@ interface BoxBase {
 
 export interface FolderBox extends BoxBase {
   kind: 'folder';
-  /** A folder is orange (modified) if anything inside it changed. */
-  status: 'modified' | 'unchanged';
+  folder: FolderNode;
   /** Height of the band at the top that holds the folder's name. */
   header: number;
   /** The smallest zoom at which the folder shows its contents. */
@@ -43,7 +42,6 @@ export interface FolderBox extends BoxBase {
 
 export interface FileBox extends BoxBase {
   kind: 'file';
-  status: Status;
   file: FileNode;
 }
 
@@ -140,7 +138,7 @@ function elkNode(node: TreeNode, spacing: Map<string, FolderSpacing>): ElkNode {
   };
 }
 
-/** Turns the laid out ELK graph into boxes, parents first. Returns whether anything in the subtree changed. */
+/** Turns the laid out ELK graph into boxes, parents first. */
 function collect(
   elkBox: ElkNode,
   parent: FolderBox | undefined,
@@ -150,7 +148,7 @@ function collect(
   byId: Map<string, TreeNode>,
   spacing: Map<string, FolderSpacing>,
   boxes: Box[],
-): boolean {
+) {
   const node = byId.get(elkBox.id)!;
   const base = {
     id: elkBox.id,
@@ -166,8 +164,8 @@ function collect(
     revealZoom,
   };
   if (node.kind === 'file') {
-    boxes.push({ ...base, kind: 'file', status: node.status, file: node });
-    return node.status !== 'unchanged';
+    boxes.push({ ...base, kind: 'file', file: node });
+    return;
   }
 
   const openZoom = Math.max(
@@ -177,14 +175,13 @@ function collect(
   const folder: FolderBox = {
     ...base,
     kind: 'folder',
-    status: 'unchanged',
+    folder: node,
     header: spacing.get(elkBox.id)!.header,
     openZoom,
   };
   boxes.push(folder);
-  let changed = false;
   for (const child of elkBox.children ?? []) {
-    const childChanged = collect(
+    collect(
       child,
       folder,
       base.absX,
@@ -194,8 +191,5 @@ function collect(
       spacing,
       boxes,
     );
-    changed ||= childChanged;
   }
-  folder.status = changed ? 'modified' : 'unchanged';
-  return changed;
 }

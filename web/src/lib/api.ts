@@ -2,15 +2,31 @@
 
 export type Status = 'added' | 'modified' | 'deleted' | 'renamed' | 'unchanged';
 
-export interface FolderNode {
+/** What kind of change a box shows, from ADR 0004: none, only added, only removed, or both. */
+export type Hue = 'none' | 'green' | 'red' | 'orange';
+
+/** How much of a box changed: under half, at least half, or all of it. */
+export type Shade = 'light' | 'medium' | 'dark';
+
+/** How a box is colored; `shade` is absent when the hue is `none`. */
+export interface Color {
+  hue: Hue;
+  shade?: Shade;
+}
+
+export interface FolderNode extends Color {
   kind: 'folder';
   name: string;
   /** Relative to the reviewed folder; empty for the reviewed folder itself. */
   path: string;
+  /** Lines added in every file inside the folder. */
+  added: number;
+  /** Lines removed in every file inside the folder. */
+  removed: number;
   children: TreeNode[];
 }
 
-export interface FileNode {
+export interface FileNode extends Color {
   kind: 'file';
   name: string;
   path: string;
@@ -21,6 +37,8 @@ export interface FileNode {
   oldPath?: string;
   submodule: boolean;
   untracked: boolean;
+  /** Lines in the working tree. */
+  lines: number;
 }
 
 export type TreeNode = FolderNode | FileNode;
