@@ -27,6 +27,7 @@ struct Frontend;
 pub fn router(review: Review) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/commits", get(commits))
         .route("/api/tree", get(tree))
         .route("/api/diff", get(diff))
         .fallback(frontend)
@@ -44,10 +45,25 @@ async fn health() -> &'static str {
     "ok"
 }
 
-/// `GET /api/tree`: every folder and file of the review, with how each file changed.
-async fn tree(State(review): State<Arc<Review>>) -> Response {
+/// `GET /api/commits`: what can be reviewed, for the sidebar.
+async fn commits(State(review): State<Arc<Review>>) -> Response {
+    let result = tokio::task::spawn_blocking(move || review.history()).await;
+    json_response(result)
+}
+
+#[derive(Debug, Deserialize)]
+struct TreeQuery {
+    rev: Option<String>,
+}
+
+/// `GET /api/tree?rev=<rev>`: every folder and file of the review `rev`, with how each file changed.
+async fn tree(State(review): State<Arc<Review>>, Query(query): Query<TreeQuery>) -> Response {
+    let rev = match parse_rev(query.rev.as_deref()) {
+        Ok(rev) => rev,
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    };
     let result = tokio::task::spawn_blocking(move || {
-        let files = review.files(&Rev::WorkTree)?;
+        let files = review.files(&rev)?;
         let name = review
             .dir()
             .file_name()
@@ -62,13 +78,27 @@ async fn tree(State(review): State<Arc<Review>>) -> Response {
 #[derive(Debug, Deserialize)]
 struct DiffQuery {
     path: String,
+    rev: Option<String>,
 }
 
-/// `GET /api/diff?path=<path>`: the diff of one file of the review.
+/// `GET /api/diff?path=<path>&rev=<rev>`: the diff of one file of the review `rev`.
 async fn diff(State(review): State<Arc<Review>>, Query(query): Query<DiffQuery>) -> Response {
-    let result =
-        tokio::task::spawn_blocking(move || review.diff(&Rev::WorkTree, &query.path)).await;
+    let rev = match parse_rev(query.rev.as_deref()) {
+        Ok(rev) => rev,
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    };
+    let result = tokio::task::spawn_blocking(move || review.diff(&rev, &query.path)).await;
     json_response(result)
+}
+
+/// Reads the `rev` parameter, which defaults to the working tree. The error is the message for 400 Bad Request.
+fn parse_rev(rev: Option<&str>) -> Result<Rev, String> {
+    match rev {
+        None => Ok(Rev::WorkTree),
+        Some(rev) => Rev::parse(rev).ok_or_else(|| {
+            format!("{rev:?} is not a review: use worktree, index, branch or a commit SHA")
+        }),
+    }
 }
 
 /// Answers with `result` as JSON, or with the error as plain text.
@@ -273,6 +303,69 @@ mod tests {
         assert_eq!(lines[0]["text"], "one");
         assert_eq!(lines[1]["kind"], "added");
         assert_eq!(lines[1]["newLine"], 1);
+    }
+
+    #[tokio::test]
+    async fn commits_lists_the_history() {
+        let tmp = repo();
+
+        let response = get_in(tmp.path(), "/api/commits").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let history = json(response).await;
+        assert_eq!(history["uncommitted"], true);
+        assert_eq!(history["staged"], false);
+        assert_eq!(history["commits"][0]["subject"], "init");
+        assert!(history["commits"][0]["shortSha"].is_string());
+    }
+
+    #[tokio::test]
+    async fn tree_and_diff_take_a_commit() {
+        let tmp = repo();
+        let sha = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout;
+        let sha = String::from_utf8(sha).unwrap();
+        let sha = sha.trim();
+
+        let tree = json(get_in(tmp.path(), &format!("/api/tree?rev={sha}")).await).await;
+        let diff = get_in(tmp.path(), &format!("/api/diff?path=src%2Fa.txt&rev={sha}")).await;
+
+        assert_eq!(tree["children"][0]["children"][0]["status"], "added");
+        let diff = json(diff).await;
+        assert_eq!(diff["hunks"][0]["lines"][0]["text"], "one");
+    }
+
+    #[tokio::test]
+    async fn the_index_has_no_unstaged_changes() {
+        let tmp = repo();
+
+        let tree = json(get_in(tmp.path(), "/api/tree?rev=index").await).await;
+
+        assert_eq!(tree["children"][0]["children"][0]["status"], "unchanged");
+    }
+
+    #[tokio::test]
+    async fn an_invalid_rev_is_a_bad_request() {
+        let tmp = repo();
+
+        for path in ["/api/tree?rev=HEAD", "/api/diff?path=src%2Fa.txt&rev=--all"] {
+            let response = get_in(tmp.path(), path).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unknown_commit_is_not_found() {
+        let tmp = repo();
+
+        let response = get_in(tmp.path(), &format!("/api/tree?rev={}", "0".repeat(40))).await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

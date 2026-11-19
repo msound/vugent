@@ -7,7 +7,7 @@ use anyhow::Context;
 use clap::Parser;
 use tokio::net::TcpListener;
 
-/// See what your agent is doing: review uncommitted changes in your browser.
+/// See what your agent is doing: review its changes and commits in your browser.
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Args {
@@ -22,6 +22,11 @@ struct Args {
     /// Do not open the browser; only print the URL.
     #[arg(long)]
     no_open: bool,
+
+    /// Branch that the reviewed branch is compared against. Defaults to the first of origin/HEAD, main and master that
+    /// exists.
+    #[arg(long, value_name = "REF")]
+    base: Option<String>,
 }
 
 #[tokio::main]
@@ -37,6 +42,14 @@ async fn main() -> anyhow::Result<()> {
     anyhow::ensure!(path.is_dir(), "{} is not a folder", path.display());
     vugent_git::repo_root(&path)
         .with_context(|| format!("{} is not inside a git repository", path.display()))?;
+    let mut review = vugent_git::Review::new(&path);
+    if let Some(base) = &args.base {
+        review = review.with_main(base);
+        anyhow::ensure!(
+            review.main_branch()?.is_some(),
+            "cannot find the base branch {base}"
+        );
+    }
 
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, args.port));
     let listener = TcpListener::bind(addr)
@@ -52,7 +65,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let review = vugent_git::Review::new(path);
     vugent_server::serve(listener, vugent_server::router(review)).await?;
     Ok(())
 }
@@ -73,12 +85,22 @@ mod tests {
         assert_eq!(args.path, PathBuf::from("."));
         assert_eq!(args.port, 0);
         assert!(!args.no_open);
+        assert_eq!(args.base, None);
     }
 
     #[test]
     fn flags_parse() {
-        let args = Args::parse_from(["vugent", "--port", "7777", "--no-open", "src"]);
+        let args = Args::parse_from([
+            "vugent",
+            "--port",
+            "7777",
+            "--no-open",
+            "--base",
+            "develop",
+            "src",
+        ]);
         assert_eq!(args.path, PathBuf::from("src"));
+        assert_eq!(args.base.as_deref(), Some("develop"));
         assert_eq!(args.port, 7777);
         assert!(args.no_open);
     }
