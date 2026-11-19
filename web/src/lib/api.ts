@@ -73,6 +73,10 @@ export interface Commit {
   shortSha: string;
   /** The first line of the commit message. */
   subject: string;
+  /** The author's name. */
+  author: string;
+  /** When it was authored, in strict ISO 8601. */
+  date: string;
 }
 
 /** Where the branch left the main branch. */

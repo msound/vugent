@@ -49,6 +49,10 @@ pub struct Commit {
     pub short_sha: String,
     /// The first line of the commit message.
     pub subject: String,
+    /// The author's name.
+    pub author: String,
+    /// When it was authored, in strict ISO 8601.
+    pub date: String,
 }
 
 impl Review {
@@ -111,7 +115,7 @@ impl Review {
             "log",
             "--first-parent",
             "--no-show-signature",
-            "--format=%H%x00%h%x00%s",
+            "--format=%H%x00%h%x00%an%x00%aI%x00%s",
         ];
         args.extend(revs);
         args.extend(["--", "."]);
@@ -119,10 +123,12 @@ impl Review {
         Ok(String::from_utf8_lossy(&out)
             .lines()
             .filter_map(|line| {
-                let mut fields = line.splitn(3, '\0');
+                let mut fields = line.splitn(5, '\0');
                 Some(Commit {
                     sha: fields.next()?.to_owned(),
                     short_sha: fields.next()?.to_owned(),
+                    author: fields.next()?.to_owned(),
+                    date: fields.next()?.to_owned(),
                     subject: fields.next().unwrap_or_default().to_owned(),
                 })
             })
@@ -211,6 +217,8 @@ mod tests {
         let head = &history.commits[0];
         assert_eq!(head.sha, git(tmp.path(), &["rev-parse", "HEAD"]).trim());
         assert!(head.sha.starts_with(&head.short_sha));
+        assert_eq!(head.author, "Test");
+        assert!(head.date.contains('T'), "{}", head.date);
         assert!(!history.uncommitted && !history.staged && !history.unstaged);
     }
 

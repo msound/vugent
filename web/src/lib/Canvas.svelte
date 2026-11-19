@@ -29,9 +29,10 @@
   const nodeTypes: NodeTypes = { folder: FolderView, file: FileView };
   const flow = useSvelteFlow();
 
-  // Leave room on the left for the sidebar: --sidebar-width plus its margin and a gap.
+  // Leave room on the left for the sidebar (--sidebar-width plus its margin and a gap) and at the top for the header
+  // (--header-height plus its margin and a gap).
   const fitPadding = {
-    top: '4%',
+    top: '84px',
     right: '4%',
     bottom: '4%',
     left: '320px',

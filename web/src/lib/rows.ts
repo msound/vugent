@@ -1,6 +1,6 @@
 // The rows of the sidebar from ADR 0005 and ADR 0006, and which one is selected.
 
-import type { History, Rev } from './api';
+import type { Commit, History, Rev } from './api';
 
 export interface Row {
   rev: Rev;
@@ -11,6 +11,8 @@ export interface Row {
   detail?: string;
   /** Indented under the branch row. */
   indented: boolean;
+  /** The commit a commit row shows. */
+  commit?: Commit;
 }
 
 /** Rows that show changes which are not committed yet. */
@@ -64,6 +66,7 @@ export function rowsOf(history: History): Row[] {
       label: commit.shortSha,
       detail: commit.subject,
       indented,
+      commit,
     });
   }
   return rows;

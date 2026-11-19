@@ -1,12 +1,20 @@
 <script lang="ts">
   import { SvelteFlowProvider } from '@xyflow/svelte';
   import { onMount } from 'svelte';
-  import { fetchHistory, fetchTree, type FileNode, type Rev } from './lib/api';
+  import {
+    fetchHistory,
+    fetchTree,
+    type Base,
+    type FileNode,
+    type Rev,
+  } from './lib/api';
   import Canvas from './lib/Canvas.svelte';
   import DiffPanel from './lib/DiffPanel.svelte';
+  import ReviewHeader from './lib/ReviewHeader.svelte';
   import Sidebar from './lib/Sidebar.svelte';
   import { layout, type Box } from './lib/layout';
   import { pick, rowsOf, type Row } from './lib/rows';
+  import { summarize, type Summary } from './lib/summary';
 
   /** How long, in milliseconds, the selection must rest before the canvas loads it, so that holding J does not
    * load every row on the way. */
@@ -17,11 +25,14 @@
     new URLSearchParams(location.search).get('rev') ?? undefined;
 
   let rows = $state<Row[] | undefined>();
+  let base = $state<Base | null>(null);
   let rev = $state<Rev | undefined>();
   let historyError = $state<string | undefined>();
 
   /** What the canvas shows. It is kept while the next review loads, so the canvas does not flash. */
-  let view = $state<{ rev: Rev; title: string; boxes: Box[] } | undefined>();
+  let view = $state<
+    { rev: Rev; title: string; boxes: Box[]; summary: Summary } | undefined
+  >();
   let loading = $state(false);
   let error = $state<string | undefined>();
 
@@ -34,6 +45,7 @@
       const history = await fetchHistory();
       historyError = undefined;
       rows = rowsOf(history);
+      base = history.base;
       const wanted = opened ? requested : rev;
       rev = pick(rows, wanted, opened);
     } catch (failure) {
@@ -44,6 +56,18 @@
   onMount(() => {
     void refresh(true);
   });
+
+  const selectedRow = $derived(rows?.find((row) => row.rev === rev));
+
+  /** The summary of the selected review, once it has loaded. */
+  const summary = $derived(view?.rev === rev ? view?.summary : undefined);
+
+  /** What the diff panel says about the review, above the file's path. */
+  const context = $derived(
+    selectedRow?.commit
+      ? `${selectedRow.commit.shortSha} ${selectedRow.commit.subject}`
+      : selectedRow?.label,
+  );
 
   let first = true;
 
@@ -72,7 +96,12 @@
           const tree = await fetchTree(current);
           const boxes = await layout(tree);
           if (live) {
-            view = { rev: current, title: tree.name, boxes };
+            view = {
+              rev: current,
+              title: tree.name,
+              boxes,
+              summary: summarize(tree),
+            };
             error = undefined;
           }
         } catch (failure) {
@@ -105,6 +134,10 @@
   onselect={(next) => (rev = next)}
 />
 
+{#if selectedRow}
+  <ReviewHeader row={selectedRow} {base} {summary} />
+{/if}
+
 {#if historyError}
   <p class="message error">Could not load the history: {historyError}</p>
 {:else if error}
@@ -126,6 +159,7 @@
       <DiffPanel
         file={openFile}
         rev={view.rev}
+        {context}
         onclose={() => (openFile = undefined)}
       />
     {/if}
@@ -136,7 +170,8 @@
 
 <style>
   .message {
-    padding: 1rem 2rem 1rem calc(var(--sidebar-width) + 2rem);
+    padding: calc(var(--header-height) + 1.5rem) 2rem 1rem
+      calc(var(--sidebar-width) + 2rem);
     color: var(--text-muted);
   }
 

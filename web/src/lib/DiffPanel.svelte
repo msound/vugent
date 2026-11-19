@@ -5,8 +5,15 @@
   let {
     file,
     rev,
+    context,
     onclose,
-  }: { file: FileNode; rev: Rev; onclose: () => void } = $props();
+  }: {
+    file: FileNode;
+    rev: Rev;
+    /** What the review is, such as a commit's short SHA and subject, shown above the path. */
+    context?: string;
+    onclose: () => void;
+  } = $props();
 
   let diff = $state<FileDiff | undefined>();
   let error = $state<string | undefined>();
@@ -36,12 +43,17 @@
 <FullScreen label="Diff of {file.path}" {onclose}>
   {#snippet header()}
     <header>
-      <h2>
-        {#if file.oldPath}
-          <span class="old">{file.oldPath}</span> →
+      <div class="titles">
+        {#if context}
+          <p class="context" title={context}>{context}</p>
         {/if}
-        {file.path}
-      </h2>
+        <h2>
+          {#if file.oldPath}
+            <span class="old">{file.oldPath}</span> →
+          {/if}
+          {file.path}
+        </h2>
+      </div>
       <span class="status {file.status}">{file.status}</span>
       {#if !file.binary && !file.submodule && file.status !== 'unchanged'}
         <span class="counts">
@@ -110,9 +122,21 @@
     border-bottom: 1px solid var(--unchanged-border);
   }
 
-  h2 {
+  .titles {
     flex: 1;
     min-width: 0;
+  }
+
+  .context {
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  h2 {
     margin: 0;
     overflow: hidden;
     font-size: 1rem;

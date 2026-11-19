@@ -6,6 +6,7 @@
   --selected-bg: #ddf4ff;
   --selected-border: #0969da;
   --sidebar-width: 280px;
+  --header-height: 56px;
 
   /* How a file changed, for the diff panel. */
   --added-bg: #dafbe1;
