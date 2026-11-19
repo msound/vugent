@@ -20,7 +20,7 @@ goes
 here
 EOF
 
-When creating issues, use either of the labels: enhancement, bug.
+When creating issues, use one of the labels: enhancement, bug, documentation (such as an issue to write an ADR).
 
 Closing an issue: This one is tricky. Instead of running `gh issue close <n>`, you will be adding `Closes: #n` to the
 footer of the git commit message. When git-pushed, Github will automatically close the issue. Once pushed, there is
