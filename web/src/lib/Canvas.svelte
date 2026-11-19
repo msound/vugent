@@ -10,7 +10,7 @@
   import '@xyflow/svelte/dist/style.css';
   import FileView from './FileView.svelte';
   import FolderView from './FolderView.svelte';
-  import type { FileNode } from './api';
+  import { fetchVersion, type FileNode } from './api';
   import { FILE_WIDTH, type Box, type FileBox } from './layout';
 
   let {
@@ -25,6 +25,13 @@
 
   /** A file's diff opens once the file is drawn this much of the screen's width. */
   const FILL = 0.7;
+
+  /** Shown after the title; left out if it cannot be fetched. */
+  let version = $state<string>();
+  fetchVersion().then(
+    (value) => (version = value),
+    () => {},
+  );
 
   const nodeTypes: NodeTypes = { folder: FolderView, file: FileView };
   const flow = useSvelteFlow();
@@ -175,7 +182,10 @@
     onlyRenderVisibleElements
   >
     <Panel position="bottom-left">
-      <h1><img src="/logo.svg" alt="" />{title}</h1>
+      <h1>
+        <img src="/logo.svg" alt="" />{title}
+        {#if version}<span class="version">{version}</span>{/if}
+      </h1>
     </Panel>
   </SvelteFlow>
 </div>
@@ -202,6 +212,12 @@
     background: var(--bg);
     border: 1px solid var(--unchanged-border);
     border-radius: 6px;
+  }
+
+  .version {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-muted);
   }
 
   h1 img {

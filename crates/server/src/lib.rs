@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use rust_embed::RustEmbed;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use vugent_git::{Rev, Review};
 
@@ -27,6 +27,7 @@ struct Frontend;
 pub fn router(review: Review) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/version", get(version))
         .route("/api/commits", get(commits))
         .route("/api/commit", get(commit))
         .route("/api/tree", get(tree))
@@ -44,6 +45,19 @@ pub async fn serve(listener: TcpListener, router: Router) -> std::io::Result<()>
 
 async fn health() -> &'static str {
     "ok"
+}
+
+/// What vugent's build is, from `git describe` at build time (see `build.rs`).
+const VERSION: &str = env!("VUGENT_VERSION");
+
+#[derive(Debug, Serialize)]
+struct Version {
+    version: &'static str,
+}
+
+/// `GET /api/version`: which build of vugent is running, for the logo panel.
+async fn version() -> Json<Version> {
+    Json(Version { version: VERSION })
 }
 
 /// `GET /api/commits`: what can be reviewed, for the sidebar.
@@ -282,6 +296,19 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(body(response).await, b"ok");
+    }
+
+    #[tokio::test]
+    async fn version_returns_the_build_version() {
+        let response = get("/api/version").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body(response).await).unwrap();
+        assert_eq!(json, serde_json::json!({ "version": VERSION }));
+        assert!(
+            VERSION.starts_with('v'),
+            "{VERSION:?} does not start with v"
+        );
     }
 
     /// Runs git in `dir` for test setup, isolated from the user's git configuration.

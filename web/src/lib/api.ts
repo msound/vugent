@@ -146,6 +146,23 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+let version: Promise<string> | undefined;
+
+/**
+ * Which build of vugent is running, like `v0.2.0` or `v0.2.0+git.3.g90ba43f.dirty`. It cannot change while the page is
+ * open, so it is asked for once; a failed request is tried again on the next call.
+ */
+export function fetchVersion(): Promise<string> {
+  version ??= getJson<{ version: string }>('/api/version').then(
+    (body) => body.version,
+    (error: unknown) => {
+      version = undefined;
+      throw error;
+    },
+  );
+  return version;
+}
+
 /** What can be reviewed, for the sidebar. */
 export function fetchHistory(): Promise<History> {
   return getJson('/api/commits');
