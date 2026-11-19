@@ -3,6 +3,9 @@
   --text-muted: #59636e;
   --bg: #ffffff;
   --canvas: #f6f8fa;
+  --selected-bg: #ddf4ff;
+  --selected-border: #0969da;
+  --sidebar-width: 280px;
 
   /* How a file changed, for the diff panel. */
   --added-bg: #dafbe1;
@@ -47,6 +50,8 @@
     --text-muted: #9198a1;
     --bg: #0d1117;
     --canvas: #010409;
+    --selected-bg: #121d2f;
+    --selected-border: #4493f8;
 
     --added-bg: #12261e;
     --added-border: #3fb950;

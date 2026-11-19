@@ -37,7 +37,7 @@ export interface FileNode extends Color {
   oldPath?: string;
   submodule: boolean;
   untracked: boolean;
-  /** Lines in the working tree. */
+  /** Lines in the target of the review. */
   lines: number;
 }
 
@@ -68,6 +68,31 @@ export interface FileDiff {
   hunks: Hunk[];
 }
 
+export interface Commit {
+  sha: string;
+  shortSha: string;
+  /** The first line of the commit message. */
+  subject: string;
+}
+
+/** What can be reviewed, from ADR 0005. */
+export interface History {
+  /** The branch's name, or null when there is no branch review. */
+  branch: string | null;
+  /** Something in the reviewed folder is uncommitted. */
+  uncommitted: boolean;
+  /** Something in the reviewed folder is staged. */
+  staged: boolean;
+  /** Newest first: the branch's commits, or recent ones when there is no branch. */
+  commits: Commit[];
+}
+
+/**
+ * Which review to show: `worktree` (uncommitted changes), `index` (staged changes), `branch`, or a commit's full
+ * SHA.
+ */
+export type Rev = string;
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -77,12 +102,18 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-/** Every folder and file of the review. */
-export function fetchTree(): Promise<FolderNode> {
-  return getJson('/api/tree');
+/** What can be reviewed, for the sidebar. */
+export function fetchHistory(): Promise<History> {
+  return getJson('/api/commits');
 }
 
-/** The diff of one file of the review. */
-export function fetchDiff(path: string): Promise<FileDiff> {
-  return getJson(`/api/diff?path=${encodeURIComponent(path)}`);
+/** Every folder and file of the review `rev`. */
+export function fetchTree(rev: Rev): Promise<FolderNode> {
+  return getJson(`/api/tree?rev=${encodeURIComponent(rev)}`);
+}
+
+/** The diff of one file of the review `rev`. */
+export function fetchDiff(path: string, rev: Rev): Promise<FileDiff> {
+  const query = new URLSearchParams({ path, rev });
+  return getJson(`/api/diff?${query}`);
 }

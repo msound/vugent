@@ -1,18 +1,23 @@
 <script lang="ts">
   import { Spring } from 'svelte/motion';
-  import { fetchDiff, type FileDiff, type FileNode } from './api';
+  import { fetchDiff, type FileDiff, type FileNode, type Rev } from './api';
 
-  let { file, onclose }: { file: FileNode; onclose: () => void } = $props();
+  let {
+    file,
+    rev,
+    onclose,
+  }: { file: FileNode; rev: Rev; onclose: () => void } = $props();
 
   let diff = $state<FileDiff | undefined>();
   let error = $state<string | undefined>();
 
   $effect(() => {
     const path = file.path;
+    const review = rev;
     diff = undefined;
     error = undefined;
     let current = true;
-    fetchDiff(path).then(
+    fetchDiff(path, review).then(
       (result) => {
         if (current) diff = result;
       },

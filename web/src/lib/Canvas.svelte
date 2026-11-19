@@ -29,8 +29,13 @@
   const nodeTypes: NodeTypes = { folder: FolderView, file: FileView };
   const flow = useSvelteFlow();
 
-  // A number would be pixels.
-  const fitPadding = '4%';
+  // Leave room on the left for the sidebar: --sidebar-width plus its margin and a gap.
+  const fitPadding = {
+    top: '4%',
+    right: '4%',
+    bottom: '4%',
+    left: '320px',
+  } as const;
   let viewport = $state<Viewport>({ x: 0, y: 0, zoom: 1 });
 
   let width = $state(0);
