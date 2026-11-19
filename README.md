@@ -32,13 +32,17 @@ Set `VUGENT_SERVER` to proxy to a different address. Before committing, run `npm
 
 ## Releasing
 
-Pushing a version tag such as `v0.1.0` runs the cargo-dist release workflow (`.github/workflows/release.yml`), which
-builds the frontend, then the binaries and shell/PowerShell installers, and attaches them to a GitHub Release. Its
-configuration is in `dist-workspace.toml` and `.github/build-setup.yml`; run `dist generate` after changing them.
-
-To publish to crates.io, build the frontend first so that it is packaged with `vugent-server`:
+Releases are made with [cocogitto](https://docs.cocogitto.io/) from an up-to-date `main` (it also needs
+[cargo-edit](https://github.com/killercup/cargo-edit) for `cargo set-version`):
 
 ```sh
-cd web && npm ci && npm run build && cd ..
-VUGENT_REQUIRE_FRONTEND=1 cargo publish --workspace
+cog bump --auto
 ```
+
+This picks the next version from the conventional commits since the last tag, sets it in `Cargo.toml`, updates
+`CHANGELOG.md`, makes a `chore(version): vX.Y.Z` commit, tags it, and pushes both the commit and the tag. Its
+configuration is in `cog.toml`.
+
+The pushed tag runs the cargo-dist release workflow (`.github/workflows/release.yml`), which builds the frontend, then
+the binaries and shell/PowerShell installers, and publishes them to a GitHub Release. The cargo-dist configuration is
+in `dist-workspace.toml` and `.github/build-setup.yml`; run `dist generate` after changing them.
