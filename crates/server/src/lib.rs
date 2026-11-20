@@ -7,7 +7,7 @@ mod tree;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use axum::extract::{FromRef, Query, State};
+use axum::extract::{FromRef, Path, Query, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -56,6 +56,7 @@ pub fn router(review: Review, events: Events) -> Router {
         .route("/api/commit", get(commit))
         .route("/api/tree", get(tree))
         .route("/api/diff", get(diff))
+        .route("/api/highlight/{id}", get(highlight))
         .route("/api/events", get(events::events))
         .fallback(frontend)
         .with_state(AppState {
@@ -159,8 +160,70 @@ async fn diff(State(review): State<Arc<Review>>, Query(query): Query<DiffQuery>)
         Rev::Commit(sha) if is_full_sha(sha) => "private, max-age=31536000, immutable",
         _ => "no-store",
     };
-    let result = tokio::task::spawn_blocking(move || review.diff(&rev, &query.path)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        let diff = review.diff(&rev, &query.path)?;
+        let highlight = diff.whole && !diff.binary;
+        Ok(Diff { diff, highlight })
+    })
+    .await;
     cached_json_response(result, cache)
+}
+
+/// A file's diff, as the diff panel gets it.
+#[derive(Debug, Serialize)]
+struct Diff {
+    #[serde(flatten)]
+    diff: vugent_git::FileDiff,
+    /// Whether the browser should fetch the highlighting of each side with a blob ID.
+    highlight: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct HighlightQuery {
+    path: String,
+}
+
+/// A file's lines, highlighted.
+#[derive(Debug, Serialize)]
+struct Highlighted {
+    lines: Vec<Vec<vugent_highlight::Piece>>,
+}
+
+/// The largest file that is highlighted, as large as a file diffed whole (ADR 0010).
+const HIGHLIGHT_LIMIT: usize = 1024 * 1024;
+
+/// `GET /api/highlight/<id>?path=<path>&v=<version>`: the lines of the blob `id`, which `/api/diff` gave for the
+/// file at `path`, highlighted with the grammar its path picks. A blob never changes, so the browser may keep it;
+/// `v` is ignored, and only keeps an upgraded vugent, whose grammars may differ, from being served old answers. A
+/// working tree file that changed since its diff was fetched is not found.
+async fn highlight(
+    State(review): State<Arc<Review>>,
+    Path(id): Path<String>,
+    Query(query): Query<HighlightQuery>,
+) -> Response {
+    let result = tokio::task::spawn_blocking(move || {
+        let content = review.content(&id, &query.path)?;
+        if content.len() > HIGHLIGHT_LIMIT {
+            return Ok(None);
+        }
+        let lines = vugent_highlight::highlight_file(&query.path, &content);
+        Ok(Some(Highlighted { lines }))
+    })
+    .await;
+    let result = match result {
+        Ok(Ok(None)) => {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                [(header::CACHE_CONTROL, "no-store")],
+                "the file is too large to highlight",
+            )
+                .into_response();
+        }
+        Ok(Ok(Some(highlighted))) => Ok(Ok(highlighted)),
+        Ok(Err(error)) => Ok(Err(error)),
+        Err(error) => Err(error),
+    };
+    cached_json_response(result, "private, max-age=31536000, immutable")
 }
 
 /// Whether `sha` is a commit's whole SHA-1 or SHA-256 in lowercase hex, rather than an abbreviation that may come to
@@ -384,6 +447,60 @@ mod tests {
 
     async fn json(response: Response) -> serde_json::Value {
         serde_json::from_slice(&body(response).await).unwrap()
+    }
+
+    #[tokio::test]
+    async fn highlights_each_side_of_a_diff() {
+        let tmp = repo();
+        std::fs::write(tmp.path().join("src/a.txt"), "two\nthree\n").unwrap();
+        let diff = json(get_in(tmp.path(), "/api/diff?path=src%2Fa.txt").await).await;
+        assert_eq!(diff["highlight"], true);
+        let (old, new) = (
+            diff["oldId"].as_str().unwrap(),
+            diff["newId"].as_str().unwrap(),
+        );
+
+        let old = get_in(
+            tmp.path(),
+            &format!("/api/highlight/{old}?path=src%2Fa.txt&v=1"),
+        )
+        .await;
+        let new = get_in(
+            tmp.path(),
+            &format!("/api/highlight/{new}?path=src%2Fa.txt&v=1"),
+        )
+        .await;
+
+        assert_eq!(old.status(), StatusCode::OK);
+        assert!(header_of(&old, header::CACHE_CONTROL).contains("immutable"));
+        assert_eq!(
+            json(old).await,
+            serde_json::json!({ "lines": [[{ "text": "one" }]] })
+        );
+        assert_eq!(
+            json(new).await["lines"][1],
+            serde_json::json!([{ "text": "three" }])
+        );
+    }
+
+    #[tokio::test]
+    async fn highlights_with_the_grammar_of_the_path_until_the_file_changes() {
+        let tmp = repo();
+        std::fs::write(tmp.path().join("src/b.rs"), "fn main() {}\n").unwrap();
+        let diff = json(get_in(tmp.path(), "/api/diff?path=src%2Fb.rs").await).await;
+        let new = diff["newId"].as_str().unwrap();
+        let url = format!("/api/highlight/{new}?path=src%2Fb.rs");
+
+        let rust = json(get_in(tmp.path(), &url).await).await;
+        std::fs::write(tmp.path().join("src/b.rs"), "fn changed() {}\n").unwrap();
+        let changed = get_in(tmp.path(), &url).await;
+
+        assert_eq!(
+            rust["lines"][0][0],
+            serde_json::json!({ "text": "fn", "class": "keyword" })
+        );
+        assert_eq!(changed.status(), StatusCode::NOT_FOUND);
+        assert_eq!(header_of(&changed, header::CACHE_CONTROL), "no-store");
     }
 
     #[tokio::test]

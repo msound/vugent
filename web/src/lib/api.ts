@@ -67,7 +67,19 @@ export interface FileDiff {
   submodule: boolean;
   /** The hunks hold every line of the file, unless it is too large (ADR 0010). */
   whole: boolean;
+  /** The old file's blob ID, to fetch its highlighting with; absent when it has no old side or is too large. */
+  oldId?: string;
+  /** The new file's blob ID, like `oldId`. */
+  newId?: string;
+  /** Whether to fetch the highlighting of each side that has an ID. */
+  highlight: boolean;
   hunks: Hunk[];
+}
+
+/** A piece of a highlighted line: text, and what it is, such as `keyword`, for its color. */
+export interface Piece {
+  text: string;
+  class?: string;
 }
 
 export interface Commit {
@@ -139,11 +151,21 @@ export interface CommitDetails {
  */
 export type Rev = string;
 
+/** A request the server answered with an error. */
+export class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) {
     const message = (await response.text()).trim();
-    throw new Error(message || `HTTP ${response.status}`);
+    throw new HttpError(message || `HTTP ${response.status}`, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -182,6 +204,21 @@ export function fetchTree(rev: Rev): Promise<FolderNode> {
 export async function fetchDiff(path: string, rev: Rev): Promise<FileDiff> {
   const query = new URLSearchParams({ path, rev, v: await fetchVersion() });
   return getJson(`/api/diff?${query}`);
+}
+
+/**
+ * The lines of the blob `id` of the file at `path`, highlighted. The browser keeps them for good, since a blob never
+ * changes. A working tree file that changed since its diff was fetched is not found (404).
+ */
+export async function fetchHighlight(
+  id: string,
+  path: string,
+): Promise<Piece[][]> {
+  const query = new URLSearchParams({ path, v: await fetchVersion() });
+  const body = await getJson<{ lines: Piece[][] }>(
+    `/api/highlight/${encodeURIComponent(id)}?${query}`,
+  );
+  return body.lines;
 }
 
 /** A commit's message, trailers, author and committer, by its full SHA. */

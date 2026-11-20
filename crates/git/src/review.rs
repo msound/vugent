@@ -141,6 +141,9 @@ struct StatCandidate {
 /// One side of a file's diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Side {
+    /// The blob ID, or for a working tree file, the ID it would have; `None` for a working tree file larger than
+    /// [`WHOLE_FILE_LIMIT`], which is not read to find it.
+    id: Option<String>,
     /// In bytes.
     size: u64,
 }
@@ -289,6 +292,16 @@ impl Review {
             return Ok(diff);
         }
 
+        let sides = self.sides(&comparison, &entry)?;
+        // Only files small enough to be diffed whole are highlighted.
+        let id = |side: &Option<Side>| {
+            side.as_ref()
+                .filter(|side| side.size <= WHOLE_FILE_LIMIT)
+                .and_then(|side| side.id.clone())
+        };
+        diff.old_id = id(&sides[0]);
+        diff.new_id = id(&sides[1]);
+
         if entry.status == Status::Unchanged {
             let content = match &comparison.target {
                 Target::WorkTree => read(&self.dir.join(path))?,
@@ -304,7 +317,6 @@ impl Review {
             return Ok(diff);
         }
 
-        let sides = self.sides(&comparison, &entry)?;
         diff.whole = sides
             .iter()
             .flatten()
@@ -349,7 +361,8 @@ impl Review {
         Ok(diff)
     }
 
-    /// The old and new sides of a changed file's diff, each `None` where the file does not exist there.
+    /// The old and new sides of a file's diff, each `None` where the file does not exist there. An unchanged file
+    /// only has a new side, which its lines are shown from.
     fn sides(
         &self,
         comparison: &Comparison,
@@ -358,16 +371,17 @@ impl Review {
         let path = entry.path.as_str();
         let old_path = entry.old_path.as_deref().unwrap_or(path);
         // Objects are named relative to the reviewed folder, as in `blob`.
-        let old =
-            (!entry.untracked && entry.status != Status::Added).then(|| match &comparison.base {
-                Some(base) => format!("{base}:./{old_path}"),
-                None => format!(":./{old_path}"),
-            });
+        let has_old =
+            !entry.untracked && !matches!(entry.status, Status::Added | Status::Unchanged);
+        let old = has_old.then(|| match &comparison.base {
+            Some(base) => format!("{base}:./{old_path}"),
+            None => format!(":./{old_path}"),
+        });
         let new = match (&comparison.target, entry.status) {
             (_, Status::Deleted) => None,
             (Target::WorkTree, _) => {
                 let [old] = self.objects([old])?;
-                return Ok([old, work_tree_side(&self.dir.join(path))]);
+                return Ok([old, self.work_tree_side(path)]);
             }
             (Target::Index, _) => Some(format!(":./{path}")),
             (Target::Commit(commit), _) => Some(format!("{commit}:./{path}")),
@@ -401,9 +415,66 @@ impl Review {
             let hex = id.bytes().all(|byte| byte.is_ascii_hexdigit());
             (hex && kind == "blob" && fields.next().is_none()).then_some(())?;
             Some(Side {
+                id: Some(id.to_owned()),
                 size: size.parse().ok()?,
             })
         }))
+    }
+
+    /// The working tree side of the file at `path`, or `None` when it cannot be read.
+    fn work_tree_side(&self, path: &str) -> Option<Side> {
+        let file = self.dir.join(path);
+        let meta = std::fs::symlink_metadata(&file).ok()?;
+        let size = if meta.file_type().is_symlink() {
+            // git stores a symbolic link as its target.
+            std::fs::read_link(&file).ok()?.as_os_str().len() as u64
+        } else {
+            meta.len()
+        };
+        let id = if size <= WHOLE_FILE_LIMIT {
+            let content = read(&file).ok()?;
+            Some(self.hash(&content).ok()?)
+        } else {
+            None
+        };
+        Some(Side { id, size })
+    }
+
+    /// The ID that `content` would have as a blob, in the repository's hash format, without writing it. Filters such
+    /// as line ending conversion are not applied, so that the ID changes whenever the file does.
+    fn hash(&self, content: &[u8]) -> Result<String, Error> {
+        let output = run_stdin(
+            &self.dir,
+            &["hash-object", "--no-filters", "--stdin"],
+            content,
+        )?;
+        Ok(String::from_utf8_lossy(&output).trim().to_owned())
+    }
+
+    /// The content of the blob `id`, which `diff` gave for the file at `path`. A working tree file has no blob, so
+    /// when there is none, the file at `path` is read instead, and given only if it still has that ID; otherwise it
+    /// changed in the meantime and is not found.
+    pub fn content(&self, id: &str, path: &str) -> Result<Vec<u8>, Error> {
+        let not_found = || Error::NotFound(format!("{path} at {id}"));
+        let hex = matches!(id.len(), 40 | 64) && id.bytes().all(|byte| byte.is_ascii_hexdigit());
+        if !hex {
+            return Err(not_found());
+        }
+        if let [Some(_)] = self.objects([Some(id.to_owned())])? {
+            return self.blob(id);
+        }
+        // Only a path inside the reviewed folder is read.
+        let inside = Path::new(path)
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)));
+        if path.is_empty() || !inside {
+            return Err(not_found());
+        }
+        let content = read(&self.dir.join(path)).map_err(|_| not_found())?;
+        if self.hash(&content)? != id {
+            return Err(not_found());
+        }
+        Ok(content)
     }
 
     /// Resolves `rev` to the objects it compares.
@@ -720,18 +791,6 @@ fn read(path: &Path) -> Result<Vec<u8>, Error> {
         path: path.display().to_string(),
         source,
     })
-}
-
-/// The working tree side of a file's diff, or `None` when it cannot be read.
-fn work_tree_side(path: &Path) -> Option<Side> {
-    let meta = std::fs::symlink_metadata(path).ok()?;
-    let size = if meta.file_type().is_symlink() {
-        // git stores a symbolic link as its target.
-        std::fs::read_link(path).ok()?.as_os_str().len() as u64
-    } else {
-        meta.len()
-    };
-    Some(Side { size })
 }
 
 /// Counts the lines of a working tree file the way `git diff` would, and tells whether it is binary.
@@ -1107,6 +1166,79 @@ mod tests {
         assert!(!diff.whole);
         assert_eq!(diff.hunks.len(), 2);
         assert_eq!(diff.hunks[0].lines.len(), 8);
+    }
+
+    #[test]
+    fn gives_the_blob_id_of_each_side() {
+        let tmp = repo();
+        let dir = tmp.path();
+        write(dir, "a.txt", b"one\n2\nthree\n");
+        let review = Review::new(dir);
+        let old = git(dir, &["rev-parse", "HEAD:a.txt"]);
+        let new = git(dir, &["hash-object", "a.txt"]);
+
+        let diff = review.diff(&Rev::WorkTree, "a.txt").unwrap();
+        assert_eq!(diff.old_id.as_deref(), Some(old.trim()));
+        assert_eq!(diff.new_id.as_deref(), Some(new.trim()));
+
+        git(dir, &["add", "a.txt"]);
+        let staged = review.diff(&Rev::Index, "a.txt").unwrap();
+        assert_eq!(staged.new_id.as_deref(), Some(new.trim()));
+
+        // An unchanged file only has a new side, and a deleted one only an old side.
+        let unchanged = review.diff(&Rev::WorkTree, "src/lib.rs").unwrap();
+        assert_eq!(unchanged.old_id, None);
+        assert!(unchanged.new_id.is_some());
+        std::fs::remove_file(dir.join("src/lib.rs")).unwrap();
+        let deleted = review.diff(&Rev::WorkTree, "src/lib.rs").unwrap();
+        assert!(deleted.old_id.is_some());
+        assert_eq!(deleted.new_id, None);
+    }
+
+    #[test]
+    fn reads_blobs_and_working_tree_files_by_id() {
+        let tmp = repo();
+        let dir = tmp.path();
+        write(dir, "a.txt", b"one\n2\nthree\n");
+        let review = Review::new(dir);
+        let diff = review.diff(&Rev::WorkTree, "a.txt").unwrap();
+        let (old, new) = (diff.old_id.unwrap(), diff.new_id.unwrap());
+
+        assert_eq!(review.content(&old, "a.txt").unwrap(), b"one\ntwo\nthree\n");
+        assert_eq!(review.content(&new, "a.txt").unwrap(), b"one\n2\nthree\n");
+
+        // The file changed since its diff was asked for.
+        write(dir, "a.txt", b"other\n");
+        assert!(matches!(
+            review.content(&new, "a.txt"),
+            Err(Error::NotFound(_))
+        ));
+        // Only blobs, by full ID, and only files inside the reviewed folder.
+        let commit = head(dir);
+        for (id, path) in [
+            (commit.as_str(), "a.txt"),
+            (&old[..7], "a.txt"),
+            (new.as_str(), "../a.txt"),
+            (new.as_str(), "/etc/passwd"),
+            (new.as_str(), ""),
+        ] {
+            assert!(
+                matches!(review.content(id, path), Err(Error::NotFound(_))),
+                "{id} {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn large_files_have_no_blob_ids() {
+        let tmp = repo();
+        write(tmp.path(), "large.txt", &vec![b'x'; 1024 * 1024 + 1]);
+
+        let diff = Review::new(tmp.path())
+            .diff(&Rev::WorkTree, "large.txt")
+            .unwrap();
+
+        assert_eq!((diff.old_id, diff.new_id), (None, None));
     }
 
     #[test]

@@ -35,6 +35,15 @@
   --orange-medium: #ffaf66;
   --orange-dark: #f58a1f;
 
+  /* Syntax highlighting in diffs, readable on the added and removed backgrounds as well as the plain one. */
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-comment: #59636e;
+  --hl-function: #6639ba;
+  --hl-type: #953800;
+  --hl-constant: #0550ae;
+  --hl-tag: #116329;
+
   font:
     16px/1.5 system-ui,
     'Segoe UI',
@@ -76,6 +85,14 @@
     --orange-light: #4a2a0e;
     --orange-medium: #6e3e0f;
     --orange-dark: #995512;
+
+    --hl-keyword: #ff7b72;
+    --hl-string: #a5d6ff;
+    --hl-comment: #9198a1;
+    --hl-function: #d2a8ff;
+    --hl-type: #ffa657;
+    --hl-constant: #79c0ff;
+    --hl-tag: #7ee787;
   }
 }
 

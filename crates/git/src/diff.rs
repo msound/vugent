@@ -19,6 +19,14 @@ pub struct FileDiff {
     /// The hunks hold every line of the file rather than a few lines of context around each change, which is the
     /// case unless the file is too large on either side (ADR 0010).
     pub whole: bool,
+    /// The blob ID of the old file, or for a working tree file, the ID it would have, to highlight it with. Given
+    /// when the file exists on that side and is small enough to be diffed whole; an unchanged file only has a new
+    /// side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_id: Option<String>,
+    /// The blob ID of the new file, like `old_id`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_id: Option<String>,
     pub hunks: Vec<Hunk>,
 }
 
@@ -31,6 +39,8 @@ impl FileDiff {
             binary: entry.binary,
             submodule: entry.submodule,
             whole: false,
+            old_id: None,
+            new_id: None,
             hunks: Vec::new(),
         }
     }

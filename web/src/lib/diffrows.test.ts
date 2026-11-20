@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Line } from './api';
-import { foldLines, splitRows } from './diffrows';
+import { foldLines, piecesOf, splitRows } from './diffrows';
 
 const context = (old: number, now: number, text = 'x'): Line => ({
   kind: 'context',
@@ -121,5 +121,26 @@ describe('foldLines', () => {
   it('does not fold a file without changes', () => {
     expect(shape(foldLines(unchanged(1, 50), none))).toEqual(['50']);
     expect(foldLines([], none)).toEqual([]);
+  });
+});
+
+describe('piecesOf', () => {
+  const oldLines = [[{ text: 'a', class: 'keyword' }], [{ text: '-' }]];
+  const newLines = [[{ text: 'x' }], [{ text: '+', class: 'string' }]];
+
+  it('colors removed lines from the old file and the others from the new file', () => {
+    expect(piecesOf(removed(2), oldLines, newLines)).toBe(oldLines[1]);
+    expect(piecesOf(added(2), oldLines, newLines)).toBe(newLines[1]);
+    expect(piecesOf(context(1, 1), oldLines, newLines)).toBe(newLines[0]);
+  });
+
+  it('leaves lines plain without highlighting or when it does not match', () => {
+    expect(piecesOf(removed(2), undefined, newLines)).toBeUndefined();
+    expect(piecesOf(added(3), oldLines, newLines)).toBeUndefined();
+    expect(piecesOf(added(1), oldLines, newLines)).toBeUndefined();
+  });
+
+  it('highlights empty lines', () => {
+    expect(piecesOf(added(1, ''), oldLines, [[]])).toEqual([]);
   });
 });

@@ -1,9 +1,13 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     fetchDiff,
+    fetchHighlight,
+    HttpError,
     type FileDiff,
     type FileNode,
     type Line,
+    type Piece,
     type Rev,
   } from './api';
   import { SvelteSet } from 'svelte/reactivity';
@@ -11,6 +15,7 @@
   import {
     foldLines,
     initialLayout,
+    piecesOf,
     rememberLayout,
     splitRows,
     type Block,
@@ -50,6 +55,7 @@
     const [wanted, wantedRev] = [path, review];
     const key = `${wantedRev}\0${wanted}`;
     void version;
+    void retries;
     if (key !== shown) {
       diff = undefined;
       error = undefined;
@@ -80,6 +86,82 @@
   });
 
   const signs = { added: '+', removed: '-', context: ' ' };
+
+  /** The highlighted lines of one side of the diff, by its blob ID. */
+  interface Highlighted {
+    id: string;
+    lines: Piece[][];
+  }
+  let oldSide = $state<Highlighted | undefined>();
+  let newSide = $state<Highlighted | undefined>();
+  /** Counts the times the diff was fetched again because a working tree file changed under its highlighting. */
+  let retries = $state(0);
+  /** Blob IDs that were not found; each one only makes the diff be fetched again once. */
+  const missing = new SvelteSet<string>();
+
+  // Each side is highlighted whole (ADR 0010) and fetched by its blob ID, which the browser keeps, so a side that
+  // did not change since the last fetch is neither fetched nor highlighted again.
+  $effect(() => {
+    const current = diff;
+    if (!current?.highlight) {
+      return;
+    }
+    const lines = current.hunks.flatMap((hunk) => hunk.lines);
+    const sides = [
+      {
+        id: current.oldId,
+        path: current.oldPath ?? current.path,
+        needed: lines.some((line) => line.kind === 'removed'),
+        get: () => oldSide,
+        set: (side: Highlighted) => (oldSide = side),
+      },
+      {
+        id: current.newId,
+        path: current.path,
+        needed: lines.some((line) => line.kind !== 'removed'),
+        get: () => newSide,
+        set: (side: Highlighted) => (newSide = side),
+      },
+    ];
+    let live = true;
+    for (const side of sides) {
+      const id = side.id;
+      if (!id || !side.needed || untrack(side.get)?.id === id) {
+        continue;
+      }
+      fetchHighlight(id, side.path).then(
+        (highlighted) => {
+          if (live) side.set({ id, lines: highlighted });
+        },
+        (failure: unknown) => {
+          // A working tree file changed since its diff was fetched: fetch the diff again for its new ID. Any other
+          // failure leaves the lines plain.
+          if (
+            live &&
+            failure instanceof HttpError &&
+            failure.status === 404 &&
+            !missing.has(id)
+          ) {
+            missing.add(id);
+            retries += 1;
+          }
+        },
+      );
+    }
+    return () => {
+      live = false;
+    };
+  });
+
+  /** A line's highlighted pieces, if its side's highlighting is in. */
+  function pieces(line: Line): Piece[] | undefined {
+    const current = diff;
+    return piecesOf(
+      line,
+      oldSide && oldSide.id === current?.oldId ? oldSide.lines : undefined,
+      newSide && newSide.id === current?.newId ? newSide.lines : undefined,
+    );
+  }
 
   /** The folded stretches the user opened, by key. */
   const unfolded = new SvelteSet<string>();
@@ -140,6 +222,21 @@
 
 <svelte:window {onkeydown} />
 
+{#snippet code(line: Line)}
+  {@const highlighted = pieces(line)}
+  {#if highlighted}
+    {#each highlighted as piece, index (index)}
+      {#if piece.class}
+        <span class="hl-{piece.class}">{piece.text}</span>
+      {:else}
+        {piece.text}
+      {/if}
+    {/each}
+  {:else}
+    {line.text}
+  {/if}
+{/snippet}
+
 {#snippet fold(block: Block & { kind: 'fold' })}
   <tr class="fold">
     <td colspan="4">
@@ -153,7 +250,7 @@
 {#snippet half(line: Line | undefined, number: number | undefined)}
   {#if line}
     <td class="num {line.kind}">{number}</td>
-    <td class="code {line.kind}">{line.text}</td>
+    <td class="code {line.kind}">{@render code(line)}</td>
   {:else}
     <td class="num blank"></td>
     <td class="code blank"></td>
@@ -281,7 +378,7 @@
                       <td class="num">{line.oldLine ?? ''}</td>
                       <td class="num">{line.newLine ?? ''}</td>
                       <td class="sign">{signs[line.kind]}</td>
-                      <td class="code">{line.text}</td>
+                      <td class="code">{@render code(line)}</td>
                     </tr>
                   {/each}
                 {/if}
@@ -509,6 +606,60 @@
 
   .added {
     background: var(--added-bg);
+  }
+
+  /* The classes of highlighted pieces, from the highlight crate. */
+  .code :global(.hl-keyword) {
+    color: var(--hl-keyword);
+  }
+
+  .code :global(:is(.hl-string, .hl-literal)) {
+    color: var(--hl-string);
+  }
+
+  .code :global(.hl-comment) {
+    color: var(--hl-comment);
+  }
+
+  .code :global(:is(.hl-function, .hl-macro, .hl-label)) {
+    color: var(--hl-function);
+  }
+
+  .code :global(:is(.hl-type, .hl-module)) {
+    color: var(--hl-type);
+  }
+
+  .code
+    :global(
+      :is(
+        .hl-constant,
+        .hl-number,
+        .hl-builtin,
+        .hl-attribute,
+        .hl-property,
+        .hl-escape,
+        .hl-special,
+        .hl-heading
+      )
+    ) {
+    color: var(--hl-constant);
+  }
+
+  .code :global(.hl-tag) {
+    color: var(--hl-tag);
+  }
+
+  .code :global(.hl-link) {
+    color: var(--hl-string);
+    text-decoration: underline;
+  }
+
+  .code :global(:is(.hl-heading, .hl-strong)) {
+    font-weight: 600;
+  }
+
+  .code :global(.hl-emphasis) {
+    font-style: italic;
   }
 
   .removed {

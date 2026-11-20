@@ -1,6 +1,6 @@
 // How the lines of a diff are laid out in the diff panel, from ADR 0010.
 
-import type { Line } from './api';
+import type { Line, Piece } from './api';
 
 /** Unified shows one column of lines; split shows old lines on the left and new lines on the right. */
 export type Layout = 'unified' | 'split';
@@ -140,4 +140,28 @@ export function foldLines(
 function foldKey(first: Line): string {
   // Only unchanged lines fold, and they have a line number on both sides.
   return String(first.oldLine);
+}
+
+/**
+ * The highlighted pieces of a diff line: a removed line takes those of its line in the old file, and an added or
+ * unchanged line those of its line in the new file. Without highlighting for that side, or when the pieces do not
+ * spell the line, as when git's diff saw the file through a filter, there are none and the line is plain text.
+ */
+export function piecesOf(
+  line: Line,
+  oldLines: Piece[][] | undefined,
+  newLines: Piece[][] | undefined,
+): Piece[] | undefined {
+  const [lines, number] =
+    line.kind === 'removed'
+      ? [oldLines, line.oldLine]
+      : [newLines, line.newLine];
+  if (lines === undefined || number === undefined) {
+    return undefined;
+  }
+  const pieces = lines[number - 1];
+  if (pieces?.map((piece) => piece.text).join('') !== line.text) {
+    return undefined;
+  }
+  return pieces;
 }

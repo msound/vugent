@@ -11,6 +11,7 @@ include = ["/src/", "/build.rs", "/frontend/"]
 
 [dependencies]
 vugent-git.workspace = true
+vugent-highlight.workspace = true
 vugent-watch.workspace = true
 axum.workspace = true
 futures-util.workspace = true
