@@ -65,6 +65,8 @@ export interface FileDiff {
   status: Status;
   binary: boolean;
   submodule: boolean;
+  /** The hunks hold every line of the file, unless it is too large (ADR 0010). */
+  whole: boolean;
   hunks: Hunk[];
 }
 
@@ -173,9 +175,12 @@ export function fetchTree(rev: Rev): Promise<FolderNode> {
   return getJson(`/api/tree?rev=${encodeURIComponent(rev)}`);
 }
 
-/** The diff of one file of the review `rev`. */
-export function fetchDiff(path: string, rev: Rev): Promise<FileDiff> {
-  const query = new URLSearchParams({ path, rev });
+/**
+ * The diff of one file of the review `rev`. A commit's diff is kept by the browser for good, so vugent's version is in
+ * the URL to keep an upgrade from being served old answers.
+ */
+export async function fetchDiff(path: string, rev: Rev): Promise<FileDiff> {
+  const query = new URLSearchParams({ path, rev, v: await fetchVersion() });
   return getJson(`/api/diff?${query}`);
 }
 

@@ -6,11 +6,14 @@
     type Line,
     type Rev,
   } from './api';
+  import { SvelteSet } from 'svelte/reactivity';
   import FullScreen from './FullScreen.svelte';
   import {
+    foldLines,
     initialLayout,
     rememberLayout,
     splitRows,
+    type Block,
     type Layout,
   } from './diffrows';
 
@@ -50,6 +53,9 @@
     if (key !== shown) {
       diff = undefined;
       error = undefined;
+      // Every diff opens folded. Fetched again after a live update, stretches that still exist stay unfolded.
+      unfolded.clear();
+      allUnfolded = false;
     }
     if (gone) {
       return;
@@ -75,6 +81,30 @@
 
   const signs = { added: '+', removed: '-', context: ' ' };
 
+  /** The folded stretches the user opened, by key. */
+  const unfolded = new SvelteSet<string>();
+  /** The user unfolded every line. */
+  let allUnfolded = $state(false);
+
+  /** What each hunk shows, with folds. */
+  const hunks = $derived(
+    (diff?.hunks ?? []).map((hunk) => ({
+      header: hunk.header,
+      blocks: foldLines(hunk.lines, (key) => allUnfolded || unfolded.has(key)),
+    })),
+  );
+  /** Some lines fold, so the toggle that unfolds them all is offered. */
+  const foldable = $derived(
+    (diff?.hunks ?? []).some((hunk) =>
+      foldLines(hunk.lines, () => false).some((block) => block.kind === 'fold'),
+    ),
+  );
+
+  function switchFolding() {
+    allUnfolded = !allUnfolded;
+    unfolded.clear();
+  }
+
   let layout = $state<Layout>(initialLayout(window.innerWidth));
 
   function switchLayout() {
@@ -87,9 +117,12 @@
       event.defaultPrevented ||
       event.ctrlKey ||
       event.metaKey ||
-      event.altKey ||
-      event.key.toLowerCase() !== 's'
+      event.altKey
     ) {
+      return;
+    }
+    const key = event.key.toLowerCase();
+    if (key !== 's' && (key !== 'a' || !foldable)) {
       return;
     }
     const target = event.target as HTMLElement | null;
@@ -97,11 +130,25 @@
       return;
     }
     event.preventDefault();
-    switchLayout();
+    if (key === 's') {
+      switchLayout();
+    } else {
+      switchFolding();
+    }
   }
 </script>
 
 <svelte:window {onkeydown} />
+
+{#snippet fold(block: Block & { kind: 'fold' })}
+  <tr class="fold">
+    <td colspan="4">
+      <button type="button" onclick={() => unfolded.add(block.key)}>
+        ⋯ {block.count} unchanged lines
+      </button>
+    </td>
+  </tr>
+{/snippet}
 
 {#snippet half(line: Line | undefined, number: number | undefined)}
   {#if line}
@@ -133,6 +180,16 @@
           <span class="plus">+{file.added}</span>
           <span class="minus">−{file.removed}</span>
         </span>
+      {/if}
+      {#if foldable}
+        <button
+          type="button"
+          aria-pressed={allUnfolded}
+          onclick={switchFolding}
+          title="Show every line, or fold unchanged lines again (A)"
+        >
+          {allUnfolded ? 'Fold' : 'Unfold all'}
+        </button>
       {/if}
       <div class="toggle" role="group" title="Switch layouts (S)">
         {#each [['unified', 'Unified'], ['split', 'Side by side']] as const as [value, name] (value)}
@@ -181,37 +238,53 @@
             <col class="num-col" />
             <col />
           </colgroup>
-          {#each diff.hunks as hunk, index (index)}
+          {#each hunks as hunk, index (index)}
             <tbody>
-              <tr class="hunk">
-                <td class="num"></td>
-                <td class="code" colspan="3">{hunk.header}</td>
-              </tr>
-              {#each splitRows(hunk.lines) as row, rowIndex (rowIndex)}
-                <tr>
-                  {@render half(row.left, row.left?.oldLine)}
-                  {@render half(row.right, row.right?.newLine)}
+              {#if !diff.whole}
+                <tr class="hunk">
+                  <td class="num"></td>
+                  <td class="code" colspan="3">{hunk.header}</td>
                 </tr>
+              {/if}
+              {#each hunk.blocks as block, blockIndex (blockIndex)}
+                {#if block.kind === 'fold'}
+                  {@render fold(block)}
+                {:else}
+                  {#each splitRows(block.lines) as row, rowIndex (rowIndex)}
+                    <tr>
+                      {@render half(row.left, row.left?.oldLine)}
+                      {@render half(row.right, row.right?.newLine)}
+                    </tr>
+                  {/each}
+                {/if}
               {/each}
             </tbody>
           {/each}
         </table>
       {:else}
         <table>
-          {#each diff.hunks as hunk, index (index)}
+          {#each hunks as hunk, index (index)}
             <tbody>
-              <tr class="hunk">
-                <td class="num"></td>
-                <td class="num"></td>
-                <td class="code" colspan="2">{hunk.header}</td>
-              </tr>
-              {#each hunk.lines as line, lineIndex (lineIndex)}
-                <tr class={line.kind}>
-                  <td class="num">{line.oldLine ?? ''}</td>
-                  <td class="num">{line.newLine ?? ''}</td>
-                  <td class="sign">{signs[line.kind]}</td>
-                  <td class="code">{line.text}</td>
+              {#if !diff.whole}
+                <tr class="hunk">
+                  <td class="num"></td>
+                  <td class="num"></td>
+                  <td class="code" colspan="2">{hunk.header}</td>
                 </tr>
+              {/if}
+              {#each hunk.blocks as block, blockIndex (blockIndex)}
+                {#if block.kind === 'fold'}
+                  {@render fold(block)}
+                {:else}
+                  {#each block.lines as line, lineIndex (lineIndex)}
+                    <tr class={line.kind}>
+                      <td class="num">{line.oldLine ?? ''}</td>
+                      <td class="num">{line.newLine ?? ''}</td>
+                      <td class="sign">{signs[line.kind]}</td>
+                      <td class="code">{line.text}</td>
+                    </tr>
+                  {/each}
+                {/if}
               {/each}
             </tbody>
           {/each}
@@ -346,6 +419,7 @@
   table {
     min-width: 100%;
     border-collapse: collapse;
+    tab-size: 4;
     font:
       13px/1.5 ui-monospace,
       SFMono-Regular,
@@ -409,6 +483,28 @@
 
   .blank {
     background: var(--canvas);
+  }
+
+  .fold td {
+    padding: 0;
+    background: var(--canvas);
+  }
+
+  .fold button {
+    display: block;
+    width: 100%;
+    padding: 0.1rem 0.5rem;
+    border: none;
+    border-radius: 0;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    text-align: left;
+  }
+
+  .fold button:hover {
+    background: var(--selected-bg);
+    color: var(--text);
   }
 
   .added {

@@ -138,6 +138,20 @@ struct StatCandidate {
     old_id: String,
 }
 
+/// One side of a file's diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Side {
+    /// In bytes.
+    size: u64,
+}
+
+/// Files up to this size on both sides are diffed whole, so that the browser can show every line (ADR 0010).
+const WHOLE_FILE_LIMIT: u64 = 1024 * 1024;
+
+/// Context enough for git to include every line of a file up to [`WHOLE_FILE_LIMIT`], even one that is all line
+/// breaks, in a single hunk.
+const WHOLE_CONTEXT: &str = "-U1048577";
+
 /// git looks for a NUL byte in this many leading bytes to decide whether a file is binary.
 const BINARY_PROBE: usize = 8000;
 
@@ -275,25 +289,34 @@ impl Review {
             return Ok(diff);
         }
 
-        let output = match entry.status {
-            Status::Unchanged => {
-                let content = match &comparison.target {
-                    Target::WorkTree => read(&self.dir.join(path))?,
-                    // A path starting with ./ is relative to the reviewed folder, not the repository's root.
-                    Target::Index => self.blob(&format!(":./{path}"))?,
-                    Target::Commit(commit) => self.blob(&format!("{commit}:./{path}"))?,
-                };
-                diff.binary = is_binary(&content);
-                if !diff.binary {
-                    diff.hunks = diff::unchanged(&content);
-                }
-                return Ok(diff);
+        if entry.status == Status::Unchanged {
+            let content = match &comparison.target {
+                Target::WorkTree => read(&self.dir.join(path))?,
+                // A path starting with ./ is relative to the reviewed folder, not the repository's root.
+                Target::Index => self.blob(&format!(":./{path}"))?,
+                Target::Commit(commit) => self.blob(&format!("{commit}:./{path}"))?,
+            };
+            diff.binary = is_binary(&content);
+            if !diff.binary {
+                diff.hunks = diff::unchanged(&content);
+                diff.whole = true;
             }
-            _ if entry.untracked => run_with(
+            return Ok(diff);
+        }
+
+        let sides = self.sides(&comparison, &entry)?;
+        diff.whole = sides
+            .iter()
+            .flatten()
+            .all(|side| side.size <= WHOLE_FILE_LIMIT);
+        let context = if diff.whole { WHOLE_CONTEXT } else { "-U3" };
+        let output = if entry.untracked {
+            run_with(
                 &self.dir,
                 &[
                     "diff",
                     "--no-index",
+                    context,
                     "--no-color",
                     "--no-ext-diff",
                     "--no-textconv",
@@ -303,27 +326,84 @@ impl Review {
                 ],
                 // With --no-index, 1 means the files differ.
                 &[0, 1],
-            )?,
-            _ => {
-                let mut args = comparison.command(comparison.base.as_deref());
-                args.extend([
-                    "-p",
-                    "-M",
-                    "--no-color",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "--relative",
-                    "--",
-                ]);
-                args.extend(entry.old_path.as_deref());
-                args.push(path);
-                run(&self.dir, &args)?
-            }
+            )?
+        } else {
+            let mut args = comparison.command(comparison.base.as_deref());
+            args.extend([
+                "-p",
+                context,
+                "-M",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--relative",
+                "--",
+            ]);
+            args.extend(entry.old_path.as_deref());
+            args.push(path);
+            run(&self.dir, &args)?
         };
         let (binary, hunks) = diff::parse(&output);
         diff.binary = binary;
         diff.hunks = hunks;
         Ok(diff)
+    }
+
+    /// The old and new sides of a changed file's diff, each `None` where the file does not exist there.
+    fn sides(
+        &self,
+        comparison: &Comparison,
+        entry: &FileEntry,
+    ) -> Result<[Option<Side>; 2], Error> {
+        let path = entry.path.as_str();
+        let old_path = entry.old_path.as_deref().unwrap_or(path);
+        // Objects are named relative to the reviewed folder, as in `blob`.
+        let old =
+            (!entry.untracked && entry.status != Status::Added).then(|| match &comparison.base {
+                Some(base) => format!("{base}:./{old_path}"),
+                None => format!(":./{old_path}"),
+            });
+        let new = match (&comparison.target, entry.status) {
+            (_, Status::Deleted) => None,
+            (Target::WorkTree, _) => {
+                let [old] = self.objects([old])?;
+                return Ok([old, work_tree_side(&self.dir.join(path))]);
+            }
+            (Target::Index, _) => Some(format!(":./{path}")),
+            (Target::Commit(commit), _) => Some(format!("{commit}:./{path}")),
+        };
+        self.objects([old, new])
+    }
+
+    /// Looks up blobs by names such as `HEAD:./src/main.rs`, giving `None` for a name that is not a blob.
+    fn objects<const N: usize>(
+        &self,
+        names: [Option<String>; N],
+    ) -> Result<[Option<Side>; N], Error> {
+        // A name with a line break cannot be given to --batch-check, which reads one name per line.
+        let names = names.map(|name| name.filter(|name| !name.contains('\n')));
+        let input: String = names
+            .iter()
+            .flatten()
+            .map(|name| format!("{name}\n"))
+            .collect();
+        if input.is_empty() {
+            return Ok([const { None }; N]);
+        }
+        let output = run_stdin(&self.dir, &["cat-file", "--batch-check"], input.as_bytes())?;
+        let output = String::from_utf8_lossy(&output);
+        let mut answers = output.lines();
+        Ok(names.map(|name| {
+            name?;
+            // <id> blob <size>, or <name> missing.
+            let mut fields = answers.next()?.split(' ');
+            let (id, kind, size) = (fields.next()?, fields.next()?, fields.next()?);
+            let hex = id.bytes().all(|byte| byte.is_ascii_hexdigit());
+            (hex && kind == "blob" && fields.next().is_none()).then_some(())?;
+            Some(Side {
+                size: size.parse().ok()?,
+            })
+        }))
     }
 
     /// Resolves `rev` to the objects it compares.
@@ -642,6 +722,18 @@ fn read(path: &Path) -> Result<Vec<u8>, Error> {
     })
 }
 
+/// The working tree side of a file's diff, or `None` when it cannot be read.
+fn work_tree_side(path: &Path) -> Option<Side> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    let size = if meta.file_type().is_symlink() {
+        // git stores a symbolic link as its target.
+        std::fs::read_link(path).ok()?.as_os_str().len() as u64
+    } else {
+        meta.len()
+    };
+    Some(Side { size })
+}
+
 /// Counts the lines of a working tree file the way `git diff` would, and tells whether it is binary.
 fn count_lines(path: &Path) -> Result<(u32, bool), Error> {
     if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
@@ -942,6 +1034,81 @@ mod tests {
         );
     }
 
+    /// A file of `count` numbered lines, with line `changed` replaced when given.
+    fn numbered(count: usize, changed: Option<usize>) -> Vec<u8> {
+        (1..=count)
+            .map(|line| match changed {
+                Some(changed) if changed == line => "changed\n".to_owned(),
+                _ => format!("{line}\n"),
+            })
+            .collect::<String>()
+            .into_bytes()
+    }
+
+    #[test]
+    fn diffs_every_line_of_a_file() {
+        let tmp = repo();
+        write(tmp.path(), "long.txt", &numbered(100, None));
+        git(tmp.path(), &["add", "."]);
+        git(tmp.path(), &["commit", "--quiet", "-m", "long"]);
+        write(tmp.path(), "long.txt", &numbered(100, Some(50)));
+        let review = Review::new(tmp.path());
+
+        for rev in [Rev::WorkTree, Rev::Unstaged] {
+            let diff = review.diff(&rev, "long.txt").unwrap();
+
+            assert!(diff.whole);
+            assert_eq!(diff.hunks.len(), 1);
+            let lines = &diff.hunks[0].lines;
+            assert_eq!(lines.len(), 101);
+            assert_eq!((lines[0].old_line, lines[0].new_line), (Some(1), Some(1)));
+            assert_eq!(lines[49].kind, LineKind::Removed);
+            assert_eq!(lines[50].kind, LineKind::Added);
+            assert_eq!(lines[100].new_line, Some(100));
+        }
+
+        git(tmp.path(), &["commit", "--quiet", "-am", "change"]);
+        let commit = Rev::Commit(head(tmp.path()));
+        let diff = review.diff(&commit, "long.txt").unwrap();
+        assert!(diff.whole);
+        assert_eq!(diff.hunks[0].lines.len(), 101);
+    }
+
+    #[test]
+    fn diffs_every_line_of_untracked_files() {
+        let tmp = repo();
+        write(tmp.path(), "new.txt", &numbered(20, None));
+
+        let diff = Review::new(tmp.path())
+            .diff(&Rev::WorkTree, "new.txt")
+            .unwrap();
+
+        assert!(diff.whole);
+        assert_eq!(diff.hunks[0].lines.len(), 20);
+    }
+
+    #[test]
+    fn large_files_keep_a_few_lines_of_context() {
+        let tmp = repo();
+        // Larger than a mebibyte only after the change.
+        let count = 200_000;
+        write(tmp.path(), "large.txt", &numbered(count, None));
+        git(tmp.path(), &["add", "."]);
+        git(tmp.path(), &["commit", "--quiet", "-m", "large"]);
+        let mut content = numbered(count, Some(1000));
+        content.extend(std::iter::repeat_n(b'x', 1024 * 1024));
+        content.push(b'\n');
+        write(tmp.path(), "large.txt", &content);
+
+        let diff = Review::new(tmp.path())
+            .diff(&Rev::WorkTree, "large.txt")
+            .unwrap();
+
+        assert!(!diff.whole);
+        assert_eq!(diff.hunks.len(), 2);
+        assert_eq!(diff.hunks[0].lines.len(), 8);
+    }
+
     #[test]
     fn binary_files_have_no_lines() {
         let tmp = repo();
@@ -1145,6 +1312,7 @@ mod tests {
         assert_eq!(
             kinds(&diff),
             [
+                (LineKind::Context, "one"),
                 (LineKind::Context, "two"),
                 (LineKind::Context, "three"),
                 (LineKind::Context, "four"),

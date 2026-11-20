@@ -106,11 +106,7 @@ struct CommitQuery {
 /// SHA is taken, so the answer never changes and the browser may keep it.
 async fn commit(State(review): State<Arc<Review>>, Query(query): Query<CommitQuery>) -> Response {
     let sha = query.rev;
-    let full = matches!(sha.len(), 40 | 64)
-        && sha
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
-    if !full {
+    if !is_full_sha(&sha) {
         return (
             StatusCode::BAD_REQUEST,
             format!("{sha:?} is not a commit's full SHA"),
@@ -151,14 +147,29 @@ struct DiffQuery {
     rev: Option<String>,
 }
 
-/// `GET /api/diff?path=<path>&rev=<rev>`: the diff of one file of the review `rev`.
+/// `GET /api/diff?path=<path>&rev=<rev>&v=<version>`: the diff of one file of the review `rev`. A commit's diff,
+/// given its full SHA, never changes, so the browser may keep it; `v` is ignored, and only keeps an upgraded vugent
+/// from being served old answers.
 async fn diff(State(review): State<Arc<Review>>, Query(query): Query<DiffQuery>) -> Response {
     let rev = match parse_rev(query.rev.as_deref()) {
         Ok(rev) => rev,
         Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
     };
+    let cache = match &rev {
+        Rev::Commit(sha) if is_full_sha(sha) => "private, max-age=31536000, immutable",
+        _ => "no-store",
+    };
     let result = tokio::task::spawn_blocking(move || review.diff(&rev, &query.path)).await;
-    json_response(result)
+    cached_json_response(result, cache)
+}
+
+/// Whether `sha` is a commit's whole SHA-1 or SHA-256 in lowercase hex, rather than an abbreviation that may come to
+/// name another commit.
+fn is_full_sha(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64)
+        && sha
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// Reads the `rev` parameter, which defaults to the working tree. The error is the message for 400 Bad Request.
@@ -396,7 +407,10 @@ mod tests {
         let response = get_in(tmp.path(), "/api/diff?path=src%2Fa.txt").await;
 
         assert_eq!(response.status(), StatusCode::OK);
+        // The working tree changes all the time.
+        assert_eq!(header_of(&response, header::CACHE_CONTROL), "no-store");
         let diff = json(response).await;
+        assert_eq!(diff["whole"], true);
         let lines = &diff["hunks"][0]["lines"];
         assert_eq!(lines[0]["kind"], "removed");
         assert_eq!(lines[0]["text"], "one");
@@ -476,9 +490,21 @@ mod tests {
         let sha = sha.trim();
 
         let tree = json(get_in(tmp.path(), &format!("/api/tree?rev={sha}")).await).await;
-        let diff = get_in(tmp.path(), &format!("/api/diff?path=src%2Fa.txt&rev={sha}")).await;
+        let diff = get_in(
+            tmp.path(),
+            &format!("/api/diff?path=src%2Fa.txt&rev={sha}&v=1"),
+        )
+        .await;
+        let short = get_in(
+            tmp.path(),
+            &format!("/api/diff?path=src%2Fa.txt&rev={}", &sha[..7]),
+        )
+        .await;
 
         assert_eq!(tree["children"][0]["children"][0]["status"], "added");
+        // Only a full SHA always names the same commit.
+        assert!(header_of(&diff, header::CACHE_CONTROL).contains("immutable"));
+        assert_eq!(header_of(&short, header::CACHE_CONTROL), "no-store");
         let diff = json(diff).await;
         assert_eq!(diff["hunks"][0]["lines"][0]["text"], "one");
     }

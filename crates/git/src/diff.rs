@@ -16,6 +16,9 @@ pub struct FileDiff {
     pub binary: bool,
     /// A submodule has no hunks; vugent does not look inside it.
     pub submodule: bool,
+    /// The hunks hold every line of the file rather than a few lines of context around each change, which is the
+    /// case unless the file is too large on either side (ADR 0010).
+    pub whole: bool,
     pub hunks: Vec<Hunk>,
 }
 
@@ -27,6 +30,7 @@ impl FileDiff {
             status: entry.status,
             binary: entry.binary,
             submodule: entry.submodule,
+            whole: false,
             hunks: Vec::new(),
         }
     }
