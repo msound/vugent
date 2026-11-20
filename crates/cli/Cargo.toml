@@ -16,6 +16,7 @@ vugent-git.workspace = true
 vugent-server.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+gethostname.workspace = true
 tokio.workspace = true
 webbrowser.workspace = true
 
