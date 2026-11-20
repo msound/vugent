@@ -1,48 +1,53 @@
 :root {
-  --text: #1f2328;
-  --text-muted: #59636e;
-  --bg: #ffffff;
-  --canvas: #f6f8fa;
-  --selected-bg: #ddf4ff;
-  --selected-border: #0969da;
+  /*
+   * Colors are light-dark(light, dark). The theme follows the system unless the toggle sets data-theme on <html>,
+   * which forces color-scheme below.
+   */
+  --text: light-dark(#1f2328, #e6edf3);
+  --text-muted: light-dark(#59636e, #9198a1);
+  --bg: light-dark(#ffffff, #0d1117);
+  --canvas: light-dark(#f6f8fa, #010409);
+  --selected-bg: light-dark(#ddf4ff, #121d2f);
+  --selected-border: light-dark(#0969da, #4493f8);
   --sidebar-width: 280px;
   --header-height: 56px;
 
   /* How a file changed, for the diff panel. */
-  --added-bg: #dafbe1;
-  --added-border: #1a7f37;
-  --modified-bg: #fff1e5;
-  --modified-border: #bc4c00;
-  --deleted-bg: #ffebe9;
-  --deleted-border: #cf222e;
-  --unchanged-bg: #ffffff;
-  --unchanged-border: #d1d9e0;
+  --added-bg: light-dark(#dafbe1, #12261e);
+  --added-border: light-dark(#1a7f37, #3fb950);
+  --modified-bg: light-dark(#fff1e5, #2b1d10);
+  --modified-border: light-dark(#bc4c00, #db6d28);
+  --deleted-bg: light-dark(#ffebe9, #2d1517);
+  --deleted-border: light-dark(#cf222e, #f85149);
+  --unchanged-bg: light-dark(#ffffff, #151b23);
+  --unchanged-border: light-dark(#d1d9e0, #3d444d);
 
   /*
    * Canvas boxes, from ADR 0004: the border carries the hue, the fill carries the shade (light, medium, dark).
-   * Text keeps a contrast of at least 4.5:1 on every fill.
+   * Text keeps a contrast of at least 4.5:1 on every fill. In the dark theme, dark means the strongest fill, not the
+   * darkest.
    */
-  --green-border: #1a7f37;
-  --green-light: #c2f0cb;
-  --green-medium: #86dc98;
-  --green-dark: #45c164;
-  --red-border: #cf222e;
-  --red-light: #ffd3cf;
-  --red-medium: #ffa29c;
-  --red-dark: #f2645f;
-  --orange-border: #bc4c00;
-  --orange-light: #ffd5ad;
-  --orange-medium: #ffaf66;
-  --orange-dark: #f58a1f;
+  --green-border: light-dark(#1a7f37, #3fb950);
+  --green-light: light-dark(#c2f0cb, #173a22);
+  --green-medium: light-dark(#86dc98, #1f5a2f);
+  --green-dark: light-dark(#45c164, #277338);
+  --red-border: light-dark(#cf222e, #f85149);
+  --red-light: light-dark(#ffd3cf, #4a1b1e);
+  --red-medium: light-dark(#ffa29c, #702226);
+  --red-dark: light-dark(#f2645f, #9c2b31);
+  --orange-border: light-dark(#bc4c00, #db6d28);
+  --orange-light: light-dark(#ffd5ad, #4a2a0e);
+  --orange-medium: light-dark(#ffaf66, #6e3e0f);
+  --orange-dark: light-dark(#f58a1f, #995512);
 
   /* Syntax highlighting in diffs, readable on the added and removed backgrounds as well as the plain one. */
-  --hl-keyword: #cf222e;
-  --hl-string: #0a3069;
-  --hl-comment: #59636e;
-  --hl-function: #6639ba;
-  --hl-type: #953800;
-  --hl-constant: #0550ae;
-  --hl-tag: #116329;
+  --hl-keyword: light-dark(#cf222e, #ff7b72);
+  --hl-string: light-dark(#0a3069, #a5d6ff);
+  --hl-comment: light-dark(#59636e, #9198a1);
+  --hl-function: light-dark(#6639ba, #d2a8ff);
+  --hl-type: light-dark(#953800, #ffa657);
+  --hl-constant: light-dark(#0550ae, #79c0ff);
+  --hl-tag: light-dark(#116329, #7ee787);
 
   font:
     16px/1.5 system-ui,
@@ -54,46 +59,12 @@
   background: var(--bg);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #e6edf3;
-    --text-muted: #9198a1;
-    --bg: #0d1117;
-    --canvas: #010409;
-    --selected-bg: #121d2f;
-    --selected-border: #4493f8;
+:root[data-theme='light'] {
+  color-scheme: light;
+}
 
-    --added-bg: #12261e;
-    --added-border: #3fb950;
-    --modified-bg: #2b1d10;
-    --modified-border: #db6d28;
-    --deleted-bg: #2d1517;
-    --deleted-border: #f85149;
-    --unchanged-bg: #151b23;
-    --unchanged-border: #3d444d;
-
-    /* Dark means the strongest fill here, not the darkest. */
-    --green-border: #3fb950;
-    --green-light: #173a22;
-    --green-medium: #1f5a2f;
-    --green-dark: #277338;
-    --red-border: #f85149;
-    --red-light: #4a1b1e;
-    --red-medium: #702226;
-    --red-dark: #9c2b31;
-    --orange-border: #db6d28;
-    --orange-light: #4a2a0e;
-    --orange-medium: #6e3e0f;
-    --orange-dark: #995512;
-
-    --hl-keyword: #ff7b72;
-    --hl-string: #a5d6ff;
-    --hl-comment: #9198a1;
-    --hl-function: #d2a8ff;
-    --hl-type: #ffa657;
-    --hl-constant: #79c0ff;
-    --hl-tag: #7ee787;
-  }
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 body {

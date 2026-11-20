@@ -23,6 +23,7 @@
   import FolderView from './FolderView.svelte';
   import { fetchVersion, type FileNode } from './api';
   import { FILE_WIDTH, type Box, type FileBox } from './layout';
+  import { applyTheme, loadTheme, rememberTheme, type Theme } from './theme';
 
   let {
     boxes,
@@ -47,6 +48,24 @@
     (value) => (version = value),
     () => {},
   );
+
+  /**
+   * The color theme; index.html has already applied the stored one. Svelte Flow follows `data-theme` on `<html>` by
+   * itself, so it needs no forceColorMode.
+   */
+  let theme = $state<Theme>(loadTheme());
+
+  const themes = [
+    ['light', 'Light'],
+    ['auto', 'Auto, following the system'],
+    ['dark', 'Dark'],
+  ] as const;
+
+  function switchTheme(value: Theme) {
+    theme = value;
+    applyTheme(value);
+    rememberTheme(value);
+  }
 
   const nodeTypes: NodeTypes = { folder: FolderView, file: FileView };
   const flow = useSvelteFlow();
@@ -222,17 +241,44 @@
     onlyRenderVisibleElements
   >
     <Panel position="bottom-left">
-      <h1>
-        <a
-          href="https://github.com/msound/vugent"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="vugent on GitHub"
-        >
-          <img src="/logo.svg" alt="" />vugent
-          {#if version}<span class="version">{version}</span>{/if}
-        </a>
-      </h1>
+      <div class="title">
+        <h1>
+          <a
+            href="https://github.com/msound/vugent"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="vugent on GitHub"
+          >
+            <img src="/logo.svg" alt="" />vugent
+            {#if version}<span class="version">{version}</span>{/if}
+          </a>
+        </h1>
+        <div class="themes" role="group" aria-label="Color theme">
+          {#each themes as [value, name] (value)}
+            <button
+              type="button"
+              aria-pressed={theme === value}
+              aria-label={name}
+              title={name}
+              onclick={() => switchTheme(value)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                {#if value === 'light'}
+                  <circle cx="12" cy="12" r="4" />
+                  <path
+                    d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+                  />
+                {:else if value === 'auto'}
+                  <circle cx="12" cy="12" r="8" />
+                  <path d="M12 4a8 8 0 0 1 0 16Z" class="filled" />
+                {:else}
+                  <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
+                {/if}
+              </svg>
+            </button>
+          {/each}
+        </div>
+      </div>
       {#if polling}
         <p
           class="polling"
@@ -255,7 +301,15 @@
     --xy-background-color: var(--canvas);
   }
 
+  /* The title and the theme toggle sit side by side, looking alike. */
+  .title {
+    display: flex;
+    align-items: stretch;
+    gap: 0.4rem;
+  }
+
   h1 {
+    display: flex;
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
@@ -281,6 +335,53 @@
   h1 a:focus-visible {
     outline: 2px solid var(--selected-border);
     outline-offset: 2px;
+  }
+
+  .themes {
+    display: flex;
+    padding: 2px;
+    gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--unchanged-border);
+    border-radius: 6px;
+  }
+
+  .themes button {
+    display: grid;
+    place-items: center;
+    padding: 0 0.35rem;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .themes button:hover {
+    color: var(--text);
+  }
+
+  .themes button[aria-pressed='true'] {
+    color: var(--text);
+    background: var(--selected-bg);
+  }
+
+  .themes button:focus-visible {
+    outline: 2px solid var(--selected-border);
+  }
+
+  .themes svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .themes svg .filled {
+    fill: currentColor;
   }
 
   .version {

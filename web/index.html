@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>vugent</title>
+    <script>
+      // Applies a saved theme before the page is drawn, so it does not flash in the system's theme first. Kept in
+      // sync with src/lib/theme.ts.
+      try {
+        const theme = localStorage.getItem('vugent.theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch {
+        // Storage can be blocked; the system's theme is used then.
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

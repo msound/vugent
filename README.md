@@ -20,6 +20,9 @@ network drives or `/mnt/c` under WSL. If the frontend was not built, cargo print
 warning and the binary still runs, but the UI explains how to build it. Set `VUGENT_REQUIRE_FRONTEND=1` to make the
 build fail instead.
 
+The UI follows your system's light or dark setting. The sun and moon buttons next to the vugent title in the
+bottom-left corner force the light or dark theme, and the button between them follows the system again.
+
 ## Running on a remote server
 
 When vugent runs on a server you reach over SSH, the safest way to open it is to forward its port, so that vugent
@@ -49,7 +52,7 @@ export VUGENT_PORT=8000 VUGENT_NO_OPEN=1
 ```
 
 A fixed port also keeps the browser's origin the same from run to run, so it remembers your preferences, such as the
-diff layout. Only one vugent can listen on a port, so pass `--port 0` to a second one to pick any free port. There is
+diff layout and the theme. Only one vugent can listen on a port, so pass `--port 0` to a second one to pick any free port. There is
 no variable for the access token, which is always random.
 
 ## Frontend development
