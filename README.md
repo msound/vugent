@@ -34,10 +34,11 @@ Then open `http://localhost:8000/` on your laptop. VS Code Remote-SSH forwards p
 
 Otherwise, `vugent --host 0.0.0.0 --port 8000` listens on every address of the server and prints a URL with its host
 name and a random access token, such as `http://server:8000/?token=…`. Open that URL; the browser then keeps the token
-in a cookie, and every request without it is refused. A new token is made every time vugent starts, so open the new
-URL after a restart. Pick a fixed port that your firewall allows; ports below 1024 need root. The browser is not
-opened, since it is on another machine. Note that vugent speaks plain HTTP, so the token and the code travel
-unencrypted on the network.
+in a cookie, and every request without it is refused. If the host name cannot be reached from your machine, pass the
+server's IP address instead, such as `--host 192.168.1.5`, and the URL uses that address. A new token is made every
+time vugent starts, so open the new URL after a restart. Pick a fixed port that your firewall allows; ports below 1024
+need root. The browser is not opened, since it is on another machine. Note that vugent speaks plain HTTP, so the token
+and the code travel unencrypted on the network.
 
 ## Frontend development
 
