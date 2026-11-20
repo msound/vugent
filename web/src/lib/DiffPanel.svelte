@@ -1,6 +1,18 @@
 <script lang="ts">
-  import { fetchDiff, type FileDiff, type FileNode, type Rev } from './api';
+  import {
+    fetchDiff,
+    type FileDiff,
+    type FileNode,
+    type Line,
+    type Rev,
+  } from './api';
   import FullScreen from './FullScreen.svelte';
+  import {
+    initialLayout,
+    rememberLayout,
+    splitRows,
+    type Layout,
+  } from './diffrows';
 
   let {
     file,
@@ -62,7 +74,44 @@
   });
 
   const signs = { added: '+', removed: '-', context: ' ' };
+
+  let layout = $state<Layout>(initialLayout(window.innerWidth));
+
+  function switchLayout() {
+    layout = layout === 'split' ? 'unified' : 'split';
+    rememberLayout(layout);
+  }
+
+  function onkeydown(event: KeyboardEvent) {
+    if (
+      event.defaultPrevented ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      event.key.toLowerCase() !== 's'
+    ) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, select, [contenteditable]')) {
+      return;
+    }
+    event.preventDefault();
+    switchLayout();
+  }
 </script>
+
+<svelte:window {onkeydown} />
+
+{#snippet half(line: Line | undefined, number: number | undefined)}
+  {#if line}
+    <td class="num {line.kind}">{number}</td>
+    <td class="code {line.kind}">{line.text}</td>
+  {:else}
+    <td class="num blank"></td>
+    <td class="code blank"></td>
+  {/if}
+{/snippet}
 
 <FullScreen label="Diff of {file.path}" {onclose}>
   {#snippet header()}
@@ -85,6 +134,19 @@
           <span class="minus">−{file.removed}</span>
         </span>
       {/if}
+      <div class="toggle" role="group" title="Switch layouts (S)">
+        {#each [['unified', 'Unified'], ['split', 'Side by side']] as const as [value, name] (value)}
+          <button
+            type="button"
+            aria-pressed={layout === value}
+            onclick={() => {
+              if (layout !== value) switchLayout();
+            }}
+          >
+            {name}
+          </button>
+        {/each}
+      </div>
       <button type="button" onclick={onclose} title="Back to the diagram">
         Esc
       </button>
@@ -111,25 +173,50 @@
     </p>
   {:else}
     <div class="scroll">
-      <table>
-        {#each diff.hunks as hunk, index (index)}
-          <tbody>
-            <tr class="hunk">
-              <td class="num"></td>
-              <td class="num"></td>
-              <td class="code" colspan="2">{hunk.header}</td>
-            </tr>
-            {#each hunk.lines as line, lineIndex (lineIndex)}
-              <tr class={line.kind}>
-                <td class="num">{line.oldLine ?? ''}</td>
-                <td class="num">{line.newLine ?? ''}</td>
-                <td class="sign">{signs[line.kind]}</td>
-                <td class="code">{line.text}</td>
+      {#if layout === 'split'}
+        <table class="split">
+          <colgroup>
+            <col class="num-col" />
+            <col />
+            <col class="num-col" />
+            <col />
+          </colgroup>
+          {#each diff.hunks as hunk, index (index)}
+            <tbody>
+              <tr class="hunk">
+                <td class="num"></td>
+                <td class="code" colspan="3">{hunk.header}</td>
               </tr>
-            {/each}
-          </tbody>
-        {/each}
-      </table>
+              {#each splitRows(hunk.lines) as row, rowIndex (rowIndex)}
+                <tr>
+                  {@render half(row.left, row.left?.oldLine)}
+                  {@render half(row.right, row.right?.newLine)}
+                </tr>
+              {/each}
+            </tbody>
+          {/each}
+        </table>
+      {:else}
+        <table>
+          {#each diff.hunks as hunk, index (index)}
+            <tbody>
+              <tr class="hunk">
+                <td class="num"></td>
+                <td class="num"></td>
+                <td class="code" colspan="2">{hunk.header}</td>
+              </tr>
+              {#each hunk.lines as line, lineIndex (lineIndex)}
+                <tr class={line.kind}>
+                  <td class="num">{line.oldLine ?? ''}</td>
+                  <td class="num">{line.newLine ?? ''}</td>
+                  <td class="sign">{signs[line.kind]}</td>
+                  <td class="code">{line.text}</td>
+                </tr>
+              {/each}
+            </tbody>
+          {/each}
+        </table>
+      {/if}
     </div>
   {/if}
 </FullScreen>
@@ -223,6 +310,30 @@
     cursor: pointer;
   }
 
+  .toggle {
+    display: flex;
+  }
+
+  .toggle button:not(:first-child) {
+    border-left: none;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+
+  .toggle button:not(:last-child) {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .toggle button[aria-pressed='true'] {
+    border-color: var(--selected-border);
+    background: var(--selected-bg);
+  }
+
+  .toggle button[aria-pressed='true'] + button {
+    border-left: 1px solid var(--selected-border);
+  }
+
   .message {
     padding: 1rem;
     color: var(--text-muted);
@@ -270,6 +381,33 @@
     padding-top: 0.25rem;
     padding-bottom: 0.25rem;
     color: var(--text-muted);
+    background: var(--canvas);
+  }
+
+  .split {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .num-col {
+    width: 6ch;
+  }
+
+  /* Side by side, each half is as wide as the other, so long lines wrap. */
+  .split .code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .split td.code {
+    border-right: 1px solid var(--unchanged-border);
+  }
+
+  .split td.code:last-child {
+    border-right: none;
+  }
+
+  .blank {
     background: var(--canvas);
   }
 
