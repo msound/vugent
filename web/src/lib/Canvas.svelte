@@ -26,13 +26,11 @@
 
   let {
     boxes,
-    title,
     activity,
     polling = false,
     onopenfile,
   }: {
     boxes: Box[];
-    title: string;
     /** The boxes whose line counts changed in the last live update, by box id, and a number for that update. */
     activity?: { nonce: number; changed: Map<string, Activity> };
     /** The server polls for changes rather than watching files (ADR 0008). */
@@ -43,7 +41,7 @@
   /** A file's diff opens once the file is drawn this much of the screen's width. */
   const FILL = 0.7;
 
-  /** Shown after the title; left out if it cannot be fetched. */
+  /** vugent's version, shown after its name; left out if it cannot be fetched. */
   let version = $state<string>();
   fetchVersion().then(
     (value) => (version = value),
@@ -225,7 +223,7 @@
   >
     <Panel position="bottom-left">
       <h1>
-        <img src="/logo.svg" alt="" />{title}
+        <img src="/logo.svg" alt="" />vugent
         {#if version}<span class="version">{version}</span>{/if}
       </h1>
       {#if polling}

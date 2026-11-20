@@ -13,6 +13,8 @@ const FALLBACK_COMMITS: &str = "50";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct History {
+    /// The reviewed folder's name, shown at the top of the sidebar and in the browser tab's title.
+    pub name: String,
     /// The current branch's name, or the short SHA of a detached `HEAD`. `None` when there is no branch review: on
     /// the main branch itself, when no main branch is found, or when no commit of the branch touches the folder.
     pub branch: Option<String>,
@@ -67,6 +69,7 @@ impl Review {
         let staged = self.differs(&["diff-index", "--cached", &base])?;
         let unstaged = self.differs(&["diff-files"])? || self.has_untracked()?;
         let mut history = History {
+            name: self.name(),
             branch: None,
             base: None,
             uncommitted,

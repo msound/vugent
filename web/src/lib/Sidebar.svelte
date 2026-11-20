@@ -4,12 +4,15 @@
   import type { Row } from './rows';
 
   let {
+    name,
     rows,
     selected,
     loading,
     keys,
     onselect,
   }: {
+    /** The reviewed folder's name; left out until the history loads. */
+    name: string | undefined;
     rows: Row[] | undefined;
     selected: Rev | undefined;
     /** The selected review is loading. */
@@ -62,6 +65,9 @@
 <svelte:window {onkeydown} />
 
 <nav class="sidebar" aria-label="What to review" aria-busy={loading}>
+  {#if name}
+    <h2 class="name" title={name}>{name}</h2>
+  {/if}
   {#if rows === undefined}
     <p class="message">Loading…</p>
   {:else if rows.length === 0}
@@ -115,6 +121,18 @@
     border-radius: 6px;
     box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
     font-size: 0.85rem;
+  }
+
+  .name {
+    flex: none;
+    margin: 0;
+    padding: 0.4rem 0.75rem;
+    overflow: hidden;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--unchanged-border);
   }
 
   ul {

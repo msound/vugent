@@ -30,6 +30,8 @@
     new URLSearchParams(location.search).get('rev') ?? undefined;
 
   let rows = $state<Row[] | undefined>();
+  /** The reviewed folder's name, from the history. */
+  let name = $state<string | undefined>();
   let base = $state<Base | null>(null);
   let github = $state<string | null>(null);
   let rev = $state<Rev | undefined>();
@@ -40,7 +42,6 @@
     | {
         rev: Rev;
         tree: FolderNode;
-        title: string;
         boxes: Box[];
         summary: Summary;
         /** What changed since the review was last fetched, when it was fetched again. */
@@ -94,6 +95,7 @@
       const history = await fetchHistory();
       historyError = undefined;
       rows = rowsOf(history);
+      name = history.name;
       base = history.base;
       github = history.github;
       const wanted = opened ? requested : rev;
@@ -125,7 +127,6 @@
     view = {
       rev: current,
       tree,
-      title: tree.name,
       boxes,
       summary: summarize(tree),
       activity,
@@ -184,6 +185,10 @@
       onchange,
       onmode: (value) => (polling = value),
     });
+  });
+
+  $effect(() => {
+    document.title = name ? `${name} · vugent` : 'vugent';
   });
 
   const selectedRow = $derived(rows?.find((row) => row.rev === rev));
@@ -246,6 +251,7 @@
 <svelte:window {onkeydown} />
 
 <Sidebar
+  {name}
   {rows}
   selected={rev}
   {loading}
@@ -268,13 +274,12 @@
   <p class="message error">Could not load the changes: {error}</p>
 {:else if view}
   {#if view.boxes.length === 0}
-    <p class="message">There are no files to review in {view.title}.</p>
+    <p class="message">There are no files to review in {view.tree.name}.</p>
   {:else}
     {#key view.rev}
       <SvelteFlowProvider>
         <Canvas
           boxes={view.boxes}
-          title={view.title}
           activity={view.activity}
           {polling}
           onopenfile={open}

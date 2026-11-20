@@ -103,6 +103,8 @@ export interface Base {
 
 /** What can be reviewed, from ADR 0005, ADR 0006 and ADR 0007. */
 export interface History {
+  /** The reviewed folder's name, such as `myproject`. */
+  name: string;
   /** The branch's name, or null when there is no branch review. */
   branch: string | null;
   /** What the branch is compared against; null exactly when `branch` is. */

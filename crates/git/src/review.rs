@@ -190,6 +190,14 @@ impl Review {
         &self.dir
     }
 
+    /// The reviewed folder's name, such as `myproject`; empty for the root of the filesystem.
+    pub fn name(&self) -> String {
+        self.dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
     /// The main branch that branch review compares against, or `None` when there is none.
     pub fn main_branch(&self) -> Result<Option<String>, Error> {
         let candidates = match &self.main {

@@ -131,12 +131,7 @@ async fn tree(State(review): State<Arc<Review>>, Query(query): Query<TreeQuery>)
     };
     let result = tokio::task::spawn_blocking(move || {
         let files = review.files(&rev)?;
-        let name = review
-            .dir()
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        Ok(tree::build(&name, files))
+        Ok(tree::build(&review.name(), files))
     })
     .await;
     json_response(result)
@@ -543,6 +538,8 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let history = json(response).await;
+        let name = tmp.path().file_name().unwrap().to_string_lossy();
+        assert_eq!(history["name"], *name);
         assert_eq!(history["uncommitted"], true);
         assert_eq!(history["staged"], false);
         assert_eq!(history["unstaged"], true);
