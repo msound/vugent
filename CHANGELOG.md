@@ -2,6 +2,17 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.4.0](https://github.com/msound/vugent/compare/d84248de76f14a0faca295d6ca783fe13248dd78..v0.4.0) - 2026-11-20
+#### Features
+- highlight syntax in diffs - ([5f598ca](https://github.com/msound/vugent/commit/5f598ca5507922a70cc16311527d7e2b82331dfe)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- show the whole file around the changes in the diff - ([b538059](https://github.com/msound/vugent/commit/b538059dba8faf69091ad0ee512d51945142c609)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- switch the diff between unified and side-by-side - ([5522097](https://github.com/msound/vugent/commit/552209742d4bdfa622cf0123c9e058d81bb20dee)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- read default options from VUGENT_* environment variables - ([72878b7](https://github.com/msound/vugent/commit/72878b77ea0bac4e8295636234a0b64796babe68)) - [@msound](https://github.com/msound), Claude Opus 5.5
+#### Documentation
+- record the decision on the diff view - ([d84248d](https://github.com/msound/vugent/commit/d84248de76f14a0faca295d6ca783fe13248dd78)) - [@msound](https://github.com/msound), Claude Opus 5.5
+
+- - -
+
 ## [v0.3.0](https://github.com/msound/vugent/compare/90ba43f8ba83f2f84ca88ab1d4be7a092d9dee06..v0.3.0) - 2026-11-20
 #### Features
 - require an access token beyond localhost - ([a06a94c](https://github.com/msound/vugent/commit/a06a94c4991e64706f48d7b37937a950d49e0fe3)) - [@msound](https://github.com/msound), Claude Opus 5.5
