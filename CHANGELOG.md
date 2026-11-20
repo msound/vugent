@@ -2,6 +2,16 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.5.0](https://github.com/msound/vugent/compare/fb92123f5e23ddda95b74a881daaa101a954da57..v0.5.0) - 2026-11-20
+#### Features
+- point to the GitHub page at the end of --help - ([9e522ae](https://github.com/msound/vugent/commit/9e522ae775054b7e1b6a683866470c5dd0eb3cca)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- add a light / dark / auto theme toggle - ([e510070](https://github.com/msound/vugent/commit/e5100702da95e56a6658a74dc058ec5bd3738432)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- link the floating title to the vugent GitHub page - ([c9e7de2](https://github.com/msound/vugent/commit/c9e7de2d2987e9e1eefc8af08c0eab9a6dc771fb)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- always show "vugent" in the floating title and move the project name to the sidebar - ([4a0c1f2](https://github.com/msound/vugent/commit/4a0c1f28b77d753a9cf5b3fa5383f900d13eec34)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- use orange instead of grey in the logo - ([fb92123](https://github.com/msound/vugent/commit/fb92123f5e23ddda95b74a881daaa101a954da57)) - [@msound](https://github.com/msound), Claude Opus 5.5
+
+- - -
+
 ## [v0.4.0](https://github.com/msound/vugent/compare/d84248de76f14a0faca295d6ca783fe13248dd78..v0.4.0) - 2026-11-20
 #### Features
 - highlight syntax in diffs - ([5f598ca](https://github.com/msound/vugent/commit/5f598ca5507922a70cc16311527d7e2b82331dfe)) - [@msound](https://github.com/msound), Claude Opus 5.5

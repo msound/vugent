@@ -1571,7 +1571,7 @@ checksum = "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6"
 
 [[package]]
 name = "vugent"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1584,7 +1584,7 @@ dependencies = [
 
 [[package]]
 name = "vugent-git"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "tempfile",
@@ -1593,7 +1593,7 @@ dependencies = [
 
 [[package]]
 name = "vugent-highlight"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "tree-sitter",
@@ -1611,7 +1611,7 @@ dependencies = [
 
 [[package]]
 name = "vugent-server"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "vugent-watch"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "ignore",
  "notify",
