@@ -1,15 +1,21 @@
 //! The `vugent` command.
 
+use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 use anyhow::Context;
-use clap::Parser;
+use clap::builder::BoolishValueParser;
+use clap::parser::ValueSource;
+use clap::{CommandFactory, FromArgMatches, Parser};
 use tokio::net::TcpListener;
 
 /// See what your agent is doing: review its changes and commits in your browser.
+///
+/// The VUGENT_* environment variables set the defaults of the options they are shown with, such as VUGENT_PORT=8000 in
+/// .bashrc or .zshrc; an option on the command line wins over its variable.
 #[derive(Debug, Parser)]
-#[command(version, about)]
+#[command(version, about, long_about)]
 struct Args {
     /// Folder to review; it must be inside a git repository.
     #[arg(default_value = ".")]
@@ -18,17 +24,17 @@ struct Args {
     /// Address to listen on, IPv4 or IPv6. Use the server's address, 0.0.0.0 or :: to reach vugent from other
     /// machines; the URL then carries a random access token. SSH port forwarding is safer, since vugent speaks plain
     /// HTTP.
-    #[arg(long, value_name = "IP", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
+    #[arg(long, env = "VUGENT_HOST", value_name = "IP", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     host: IpAddr,
 
     /// Port to listen on. 0 picks any free port. A fixed port, such as 8000, helps with firewalls that only allow some
     /// ports; ports below 1024 need root.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, env = "VUGENT_PORT", default_value_t = 0)]
     port: u16,
 
     /// Do not open the browser; only print the URL. The browser is never opened when --host is not a loopback
     /// address.
-    #[arg(long)]
+    #[arg(long, env = "VUGENT_NO_OPEN", value_parser = BoolishValueParser::new())]
     no_open: bool,
 
     /// Branch that the reviewed branch is compared against. Defaults to the first of origin/HEAD, main and master that
@@ -38,13 +44,15 @@ struct Args {
 
     /// Check for changes every few seconds instead of watching files, for file systems that report no changes, such
     /// as network drives or /mnt/c under WSL.
-    #[arg(long)]
+    #[arg(long, env = "VUGENT_POLL", value_parser = BoolishValueParser::new())]
     poll: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+    let matches = Args::command().get_matches();
+    let args = Args::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+    let port_source = matches.value_source("port");
 
     vugent_git::version().context("vugent needs git; install it and make sure it is on PATH")?;
 
@@ -65,9 +73,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let addr = SocketAddr::from((args.host, args.port));
-    let listener = TcpListener::bind(addr)
-        .await
-        .with_context(|| format!("cannot listen on {addr}"))?;
+    let listener = TcpListener::bind(addr).await.map_err(|err| {
+        let message = listen_error(addr, port_source, err.kind());
+        anyhow::Error::new(err).context(message)
+    })?;
     let local_addr = listener.local_addr()?;
     let mut url = url(local_addr, || {
         gethostname::gethostname().to_string_lossy().into_owned()
@@ -105,6 +114,25 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Why vugent cannot listen on `addr`, whose port came from `port_source`, after an error of `kind`. A fixed port,
+/// from --port or VUGENT_PORT, is taken when another vugent already runs on the same machine, so the message then says
+/// where the port came from and how to get any free one.
+fn listen_error(addr: SocketAddr, port_source: Option<ValueSource>, kind: ErrorKind) -> String {
+    let from = match port_source {
+        Some(ValueSource::CommandLine) => "--port",
+        Some(ValueSource::EnvVariable) => "VUGENT_PORT",
+        _ => return format!("cannot listen on {addr}"),
+    };
+    if kind != ErrorKind::AddrInUse || addr.port() == 0 {
+        return format!("cannot listen on {addr}");
+    }
+    format!(
+        "cannot listen on {addr}: port {} (from {from}) is already in use, perhaps by another vugent; use --port 0 to \
+         pick any free port",
+        addr.port()
+    )
+}
+
 /// The URL to open vugent at, listening on `addr`. An unspecified address (0.0.0.0 or ::) cannot be opened, so the
 /// machine's `hostname` is used instead.
 fn url(addr: SocketAddr, hostname: impl FnOnce() -> String) -> String {
@@ -120,7 +148,18 @@ fn url(addr: SocketAddr, hostname: impl FnOnce() -> String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
+
+    /// Parses `argv` as if no VUGENT_* variable were set, so that the tests pass on a machine that sets them.
+    fn try_parse(argv: &[&str]) -> Result<Args, clap::Error> {
+        let matches = Args::command()
+            .mut_args(|arg| arg.env(None))
+            .try_get_matches_from(argv)?;
+        Args::from_arg_matches(&matches)
+    }
+
+    fn parse(argv: &[&str]) -> Args {
+        try_parse(argv).unwrap()
+    }
 
     #[test]
     fn args_are_valid() {
@@ -128,8 +167,62 @@ mod tests {
     }
 
     #[test]
+    fn machine_options_have_environment_variables() {
+        let command = Args::command();
+        let env = |id: &str| {
+            let arg = command
+                .get_arguments()
+                .find(|arg| arg.get_id() == id)
+                .unwrap();
+            arg.get_env().map(|env| env.to_string_lossy().into_owned())
+        };
+        assert_eq!(env("host").as_deref(), Some("VUGENT_HOST"));
+        assert_eq!(env("port").as_deref(), Some("VUGENT_PORT"));
+        assert_eq!(env("no_open").as_deref(), Some("VUGENT_NO_OPEN"));
+        assert_eq!(env("poll").as_deref(), Some("VUGENT_POLL"));
+        // The base branch belongs to a repository, not to a machine.
+        assert_eq!(env("base"), None);
+        assert_eq!(env("path"), None);
+    }
+
+    #[test]
+    fn listen_error_says_where_a_taken_port_came_from() {
+        let addr = "127.0.0.1:8000".parse().unwrap();
+        let message = listen_error(addr, Some(ValueSource::EnvVariable), ErrorKind::AddrInUse);
+        assert_eq!(
+            message,
+            "cannot listen on 127.0.0.1:8000: port 8000 (from VUGENT_PORT) is already in use, perhaps by another \
+             vugent; use --port 0 to pick any free port"
+        );
+        let message = listen_error(addr, Some(ValueSource::CommandLine), ErrorKind::AddrInUse);
+        assert!(message.contains("(from --port)"), "{message}");
+    }
+
+    #[test]
+    fn listen_error_gives_no_hint_for_other_errors() {
+        let addr = "127.0.0.1:80".parse().unwrap();
+        assert_eq!(
+            listen_error(
+                addr,
+                Some(ValueSource::CommandLine),
+                ErrorKind::PermissionDenied
+            ),
+            "cannot listen on 127.0.0.1:80"
+        );
+        let addr = "192.0.2.1:0".parse().unwrap();
+        assert_eq!(
+            listen_error(
+                addr,
+                Some(ValueSource::DefaultValue),
+                ErrorKind::AddrNotAvailable
+            ),
+            "cannot listen on 192.0.2.1:0"
+        );
+    }
+
+    #[test]
     fn path_defaults_to_current_folder() {
-        let args = Args::parse_from(["vugent"]);
+        let args = parse(&["vugent"]);
         assert_eq!(args.path, PathBuf::from("."));
         assert_eq!(args.host, IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(args.port, 0);
@@ -140,7 +233,7 @@ mod tests {
 
     #[test]
     fn flags_parse() {
-        let args = Args::parse_from([
+        let args = parse(&[
             "vugent",
             "--host",
             "::",
@@ -162,11 +255,11 @@ mod tests {
 
     #[test]
     fn host_takes_ipv4_and_ipv6_but_not_names() {
-        let args = Args::parse_from(["vugent", "--host", "0.0.0.0"]);
+        let args = parse(&["vugent", "--host", "0.0.0.0"]);
         assert_eq!(args.host, IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        let args = Args::parse_from(["vugent", "--host", "::1"]);
+        let args = parse(&["vugent", "--host", "::1"]);
         assert!(args.host.is_loopback());
-        assert!(Args::try_parse_from(["vugent", "--host", "localhost"]).is_err());
+        assert!(try_parse(&["vugent", "--host", "localhost"]).is_err());
     }
 
     fn no_hostname() -> String {

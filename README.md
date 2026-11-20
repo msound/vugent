@@ -40,6 +40,18 @@ time vugent starts, so open the new URL after a restart. Pick a fixed port that 
 need root. The browser is not opened, since it is on another machine. Note that vugent speaks plain HTTP, so the token
 and the code travel unencrypted on the network.
 
+To avoid typing the same options on every run, set them once in `.bashrc` or `.zshrc` with `VUGENT_HOST`,
+`VUGENT_PORT`, `VUGENT_NO_OPEN` and `VUGENT_POLL`; an option on the command line still wins. For example, to match the
+SSH port forwarding above:
+
+```sh
+export VUGENT_PORT=8000 VUGENT_NO_OPEN=1
+```
+
+A fixed port also keeps the browser's origin the same from run to run, so it remembers your preferences, such as the
+diff layout. Only one vugent can listen on a port, so pass `--port 0` to a second one to pick any free port. There is
+no variable for the access token, which is always random.
+
 ## Frontend development
 
 The browser UI lives in `web/` (Vite + Svelte 5 + TypeScript). Run the Rust server on a fixed port, then start the
