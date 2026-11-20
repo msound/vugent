@@ -1,5 +1,6 @@
 //! The HTTP server behind vugent's browser UI.
 
+mod access;
 mod events;
 mod tree;
 
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use vugent_git::{Rev, Review};
 
+pub use access::{Token, require_token};
 pub use events::Events;
 
 /// The built frontend, which `npm run build` in `web/` writes to this crate's `frontend/` folder. In debug builds

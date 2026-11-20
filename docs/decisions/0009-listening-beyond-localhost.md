@@ -75,9 +75,13 @@ Chosen options: **a `--host` option with a token beyond loopback**, a **random t
   cookie, so the token does not linger in the address bar or history.
 * A request with a valid cookie is served.
 * Anything else gets `401 Unauthorized`, with a short plain-text message saying to open the URL that vugent printed.
-* The cookie is `HttpOnly`, so scripts cannot read it, `SameSite=Strict`, so other sites cannot make requests with
-  it, and has `Path=/` and no expiry, so it lasts until the browser closes. It is not `Secure`, since the connection
-  is plain HTTP.
+* The cookie is `HttpOnly`, so scripts cannot read it, `SameSite=Lax`, so other sites cannot make `fetch`, frame or
+  image requests with it, and has `Path=/` and no expiry, so it lasts until the browser closes. It is not `Secure`,
+  since the connection is plain HTTP.
+* `SameSite=Strict` was ruled out: when the URL is opened from a link on another site, such as a chat app, the
+  redirect belongs to a cross-site navigation, so the browser would not send a strict cookie with it and the first
+  visit would fail. `Lax` sends it with top-level navigations, which can only show vugent's own page to the user who
+  already has the cookie; every route only reads.
 * Cookies are not kept apart by port, so its name includes the port, such as `vugent-token-8000`: two vugents on
   the same machine then do not overwrite each other's cookie.
 

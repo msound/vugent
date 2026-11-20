@@ -14,9 +14,11 @@ vugent-git.workspace = true
 vugent-watch.workspace = true
 axum.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
 rust-embed.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+subtle.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

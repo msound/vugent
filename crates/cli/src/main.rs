@@ -16,7 +16,8 @@ struct Args {
     path: PathBuf,
 
     /// Address to listen on, IPv4 or IPv6. Use the server's address, 0.0.0.0 or :: to reach vugent from other
-    /// machines; SSH port forwarding is safer, since vugent speaks plain HTTP.
+    /// machines; the URL then carries a random access token. SSH port forwarding is safer, since vugent speaks plain
+    /// HTTP.
     #[arg(long, value_name = "IP", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     host: IpAddr,
 
@@ -67,12 +68,28 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("cannot listen on {addr}"))?;
-    let url = url(listener.local_addr()?, || {
+    let local_addr = listener.local_addr()?;
+    let mut url = url(local_addr, || {
         gethostname::gethostname().to_string_lossy().into_owned()
     });
+    // Beyond loopback, anyone who can reach the port could read the code, so a random token is needed (ADR 0009).
+    let token = if args.host.is_loopback() {
+        None
+    } else {
+        let token = vugent_server::Token::generate(local_addr.port())
+            .context("cannot generate an access token")?;
+        url = format!("{url}?token={}", token.as_str());
+        Some(token)
+    };
 
     println!("Reviewing {}", path.display());
     println!("Open {url} (Ctrl-C to stop)");
+    if token.is_some() {
+        eprintln!(
+            "Warning: vugent speaks plain HTTP, so the token and your code travel unencrypted on the network. \
+             SSH port forwarding is safer: see https://github.com/msound/vugent#running-on-a-remote-server"
+        );
+    }
     if !args.no_open && args.host.is_loopback() {
         if let Err(err) = webbrowser::open(&url) {
             eprintln!("Could not open a browser ({err}); open the URL yourself.");
@@ -80,7 +97,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let events = vugent_server::Events::new(review.clone(), args.poll);
-    let router = vugent_server::router(review, events.clone());
+    let mut router = vugent_server::router(review, events.clone());
+    if let Some(token) = token {
+        router = vugent_server::require_token(router, token);
+    }
     vugent_server::serve(listener, router, events).await?;
     Ok(())
 }
