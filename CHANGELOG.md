@@ -2,6 +2,25 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## [v0.3.0](https://github.com/msound/vugent/compare/90ba43f8ba83f2f84ca88ab1d4be7a092d9dee06..v0.3.0) - 2026-11-20
+#### Features
+- require an access token beyond localhost - ([a06a94c](https://github.com/msound/vugent/commit/a06a94c4991e64706f48d7b37937a950d49e0fe3)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- add a --host option - ([9c5fc18](https://github.com/msound/vugent/commit/9c5fc18af6eab21141cdd312e5b497f4780a510f)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- animate boxes whose changes grew - ([577fd88](https://github.com/msound/vugent/commit/577fd889518c4ad2fe073ee5dfed49fbae016db7)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- follow live changes in the sidebar, canvas and diff - ([b5669db](https://github.com/msound/vugent/commit/b5669db3d27ad5935298a9e440c7a0ab885f0e8f)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- stream changes to the browser over Server-Sent Events - ([5a24d33](https://github.com/msound/vugent/commit/5a24d33cbdd315e98fbbca98ab787a3f4aca6b8c)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- watch the reviewed folder for changes - ([e2dc828](https://github.com/msound/vugent/commit/e2dc82811de2ce6010c41115eba19a631cb3042c)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- show the vugent version in the logo panel - ([fed8718](https://github.com/msound/vugent/commit/fed871894c16ffbc9a8532cbd6f4027b3f60360c)) - [@msound](https://github.com/msound), Claude Opus 5.5
+#### Bug Fixes
+- never write the index when comparing the working tree - ([6dc4762](https://github.com/msound/vugent/commit/6dc4762aebda96800b4d4da9a1f2b565d6a884fd)) - [@msound](https://github.com/msound), Claude Opus 5.5
+#### Documentation
+- suggest passing the server's IP when the host name is unreachable - ([acae19d](https://github.com/msound/vugent/commit/acae19d6ab9a793948bac765d2300d65d6b1432f)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- record the decision on listening beyond localhost - ([30f4db4](https://github.com/msound/vugent/commit/30f4db4210975804ada900e1396bf4639af788c6)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- allow the documentation label on issues - ([f2f07de](https://github.com/msound/vugent/commit/f2f07deda264360c0be8d7a2d92b2c4d41fa027b)) - [@msound](https://github.com/msound), Claude Opus 5.5
+- record the live updates decision - ([90ba43f](https://github.com/msound/vugent/commit/90ba43f8ba83f2f84ca88ab1d4be7a092d9dee06)) - [@msound](https://github.com/msound), Claude Opus 5.5
+
+- - -
+
 ## [v0.2.0](https://github.com/msound/vugent/compare/60cf2f638688c35a7e308ad152e72ed106b864e3..v0.2.0) - 2026-11-19
 #### Features
 - open the review's detail page from its header - ([806460d](https://github.com/msound/vugent/commit/806460da1170066e68cf9bb535b3d66b1158bb92)) - [@msound](https://github.com/msound), Claude Opus 5.5

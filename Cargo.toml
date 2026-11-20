@@ -3,16 +3,16 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/msound/vugent"
 
 [workspace.dependencies]
-vugent-git = { path = "crates/git", version = "0.2.0" }
-vugent-server = { path = "crates/server", version = "0.2.0" }
-vugent-watch = { path = "crates/watch", version = "0.2.0" }
+vugent-git = { path = "crates/git", version = "0.3.0" }
+vugent-server = { path = "crates/server", version = "0.3.0" }
+vugent-watch = { path = "crates/watch", version = "0.3.0" }
 
 anyhow = "1.0.104"
 axum = "0.8.9"
