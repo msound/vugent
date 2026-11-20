@@ -15,7 +15,12 @@ use tokio::net::TcpListener;
 /// The VUGENT_* environment variables set the defaults of the options they are shown with, such as VUGENT_PORT=8000 in
 /// .bashrc or .zshrc; an option on the command line wins over its variable.
 #[derive(Debug, Parser)]
-#[command(version, about, long_about)]
+#[command(
+    version,
+    about,
+    long_about,
+    after_help = "For more information, visit https://github.com/msound/vugent"
+)]
 struct Args {
     /// Folder to review; it must be inside a git repository.
     #[arg(default_value = ".")]
