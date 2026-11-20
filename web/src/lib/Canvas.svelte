@@ -223,8 +223,15 @@
   >
     <Panel position="bottom-left">
       <h1>
-        <img src="/logo.svg" alt="" />vugent
-        {#if version}<span class="version">{version}</span>{/if}
+        <a
+          href="https://github.com/msound/vugent"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="vugent on GitHub"
+        >
+          <img src="/logo.svg" alt="" />vugent
+          {#if version}<span class="version">{version}</span>{/if}
+        </a>
       </h1>
       {#if polling}
         <p
@@ -249,17 +256,31 @@
   }
 
   h1 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  /* The whole title links to vugent's GitHub page, looking the same as before. */
+  h1 a {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    margin: 0;
     padding: 0.2rem 0.6rem;
-    font-size: 1rem;
-    font-weight: 600;
     color: var(--text);
+    text-decoration: none;
     background: var(--bg);
     border: 1px solid var(--unchanged-border);
     border-radius: 6px;
+  }
+
+  h1 a:hover {
+    border-color: var(--text-muted);
+  }
+
+  h1 a:focus-visible {
+    outline: 2px solid var(--selected-border);
+    outline-offset: 2px;
   }
 
   .version {
