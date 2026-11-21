@@ -61,7 +61,7 @@ What the user sees in v0.1.0:
 | Opening a diff | Double-clicking a file, or zooming in until the file fills most of the screen, opens its diff in a full-screen panel. The panel scrolls like a normal page. Esc closes it and returns to the canvas exactly where the user left it. So does scrolling on past the end of the diff (#21): an elastic arc rises from the bottom of the screen and snaps, closing the panel, once it is pulled far enough. Only a gesture that starts at the end pulls the arc, so a fast scroll through the diff cannot close it by accident. |
 | Input | The scroll wheel, a two-finger scroll or a pinch zooms. Dragging pans. Double-clicking a folder zooms to fit it. |
 | Colors | Green for added, orange for modified, red for deleted, white for unchanged. A folder is orange if anything inside it changed. Issue #4 may refine this. |
-| Layout | elkjs lays out the whole tree once, with every folder sized to hold its contents. Because there are no edges, boxes are packed with ELK's rectangle packing algorithm. |
+| Layout | ~~elkjs lays out the whole tree once, with every folder sized to hold its contents. Because there are no edges, boxes are packed with ELK's rectangle packing algorithm.~~ Superseded by [ADR 0011](0011-diagram-layout.md): the user arranges boxes in layers, positions are saved, and packing only places boxes that have no saved position. |
 | Diff content | Plain text with added and removed lines colored. Syntax highlighting comes later; because the panel is ordinary HTML, the highlighted HTML from the server can be dropped in. |
 
 Left for later ADRs or issues:

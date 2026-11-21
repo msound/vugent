@@ -85,8 +85,9 @@ plugins, is left to the plugin architecture (#8) and caching (#7) ADRs.
 * On an event, the browser fetches the sidebar again if it is affected, and the selected review if it is affected.
   An open diff panel fetches its diff again if its file is among the paths, or if the event carries no paths. The
   panel keeps its scroll position.
-* While boxes appear and disappear, the canvas is laid out from scratch as it is today. Keeping it stable is left to
-  #5.
+* ~~While boxes appear and disappear, the canvas is laid out from scratch as it is today. Keeping it stable is left to
+  #5.~~ Superseded by [ADR 0011](0011-diagram-layout.md): boxes keep their saved positions, new ones are placed in
+  free space, and removed ones leave a gap.
 
 ### When the operating system says no
 
@@ -135,6 +136,7 @@ finds these boxes by comparing the tree it had with the one it fetched.
 * Good, because gitignored build output and dependencies cost neither inotify watches nor refreshes.
 * Bad, because every update runs git again for the whole reviewed folder. This is accepted until it is measured to be
   too slow.
-* Bad, because the layout may jump while boxes appear and disappear, until #5 decides how to keep it stable.
+* ~~Bad, because the layout may jump while boxes appear and disappear, until #5 decides how to keep it stable.~~
+  Resolved by [ADR 0011](0011-diagram-layout.md).
 * Bad, because in polling mode updates lag by 5 s or more and do not say which files changed, so an open diff panel
   fetches its diff on every update.
