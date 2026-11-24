@@ -52,8 +52,9 @@ Boxes vugent cannot place:
 ## Decision Outcome
 
 Chosen options: **the user decides, and vugent places only what the user has not**; **layers**; **the user's
-choice of the folder tree, rings or bands, rings by default**; ~~**`.vugent/layout.json`, kept out of git**~~ (superseded
-by [ADR 0012](0012-committed-layer-layout.md): a committed `.vugent.yaml`); and **an Unsorted area**.
+choice of ~~the folder tree,~~ rings or bands, rings by default** (the folder view is removed by
+[ADR 0012](0012-committed-layer-layout.md)); ~~**`.vugent/layout.json`, kept out of git**~~ (superseded by
+[ADR 0012](0012-committed-layer-layout.md): a committed `.vugent.yaml`); and **an Unsorted area**.
 
 * The canvas should match the developer's mental model of their software, and only the developer has that model.
   Like furniture in their own home, they put boxes where they want them: one user wants `package.json` out of the
@@ -74,10 +75,10 @@ by [ADR 0012](0012-committed-layer-layout.md): a committed `.vugent.yaml`); and 
 | | Decision |
 |---|---|
 | Layers | Four to start, in this order: **Model, Business, Storage, Entry**. Each has a role of the same name. The user can rename any layer, change their order, and add more. A layer keeps its role when renamed or moved, and added layers have no role. Removing a layer moves its boxes to Unsorted. |
-| Views | Four icons switch between them: **folders and files**, today's canvas with no layers, where top-level boxes sit anywhere on the canvas; and three shapes of layers. |
+| Views | ~~Four icons switch between them: **folders and files**, today's canvas with no layers, where top-level boxes sit anywhere on the canvas; and three shapes of layers.~~ Superseded by [ADR 0012](0012-committed-layer-layout.md): there is no folder view, and the shape, saved in `.vugent.yaml`, is the only choice. |
 | Shapes | **Rings** (the default; the first layer is the innermost ring), **top-down bands** (the first layer on top) and **left-right bands** (the first layer on the left). |
 | Switching shape | Keeps the user's order of layers and draws the same boxes in the new shape. It doesn't reorder layers to suit the shape. |
-| Switching view | ~~Boxes inside other boxes keep the same positions in every view, since what a box contains doesn't change. Only the top-level boxes are placed per view: at x and y in the folder view, in a layer in the others. The view is saved.~~ Superseded by [ADR 0012](0012-committed-layer-layout.md): boxes inside other boxes are laid out automatically, the folder view is laid out automatically, and the view is a personal setting kept in the browser. |
+| Switching view | ~~Boxes inside other boxes keep the same positions in every view, since what a box contains doesn't change. Only the top-level boxes are placed per view: at x and y in the folder view, in a layer in the others. The view is saved.~~ Superseded by [ADR 0012](0012-committed-layer-layout.md): boxes inside other boxes are laid out automatically, and there is no folder view to switch to. |
 | Unsorted | An area beside the layers that holds every box that hasn't been placed in a layer. |
 | Labels | Each ring or band shows its layer's name. |
 | Size | A layer grows to hold the boxes in it. A ring's thickness and a band's depth fit its tallest stack of boxes. |
@@ -95,8 +96,9 @@ reviewed folder itself is such a box when it holds files, such as `package.json`
 only folders, like `internal/` or `cmd/`, isn't drawn in the layer views. Its subfolders are boxes of their own, so
 `internal/store` and `internal/store/sql` are two boxes, side by side.
 
-The folder view keeps today's nested tree. Inside a folder, files keep the same positions in both views; in the
-layer views, the space a subfolder takes in the folder view is left as a gap.
+~~The folder view keeps today's nested tree. Inside a folder, files keep the same positions in both views; in the
+layer views, the space a subfolder takes in the folder view is left as a gap.~~ Superseded by
+[ADR 0012](0012-committed-layer-layout.md): there is no folder view, and a box's files are laid out automatically.
 
 When a plugin arrives, each folder box becomes a real package box with the same place in its layer. This fits Rust badly,
 where a module is usually a file, such as `src/http.rs`, rather than a folder, and vugent's own code would be a
@@ -187,7 +189,7 @@ other file.
 |---|---|
 | #42 | ~~Save the canvas layout in `.vugent/layout.json`, keep boxes in place across live updates and reviews, Tidy and Reset~~ Read and save the committed `.vugent.yaml` ([ADR 0012](0012-committed-layer-layout.md)) |
 | #43 | ~~Drag and drop boxes: top-level boxes between layers, the rest within their parent~~ Drag top-level boxes into a slot in a layer or Unsorted ([ADR 0012](0012-committed-layer-layout.md)) |
-| #44 | Layers shown as rings or bands, folders as package stand-ins, the folder view, and the Unsorted area |
+| #44 | Layers shown as rings or bands, folders as package stand-ins, ~~the folder view,~~ and the Unsorted area |
 | #45 | Add, rename and reorder layers |
 | #48 | Guess layers from folder names |
 | #46 | Collapse unchanged folders in large repositories |

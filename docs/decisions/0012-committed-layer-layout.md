@@ -11,12 +11,16 @@ with a placement, the change should go through a pull request like any other, so
 and kept in history. A personal file can't do that, and two teammates reviewing the same pull request would see
 two different maps.
 
+ADR 0011 also kept today's folder view, the nested folder tree with no layers, as a fourth choice next to the
+three shapes. Once the layers are the team's map, a second, unrelated way of looking at the same code makes the
+canvas less clear, not more.
+
 Once the layout is committed, saving pixel positions becomes a problem too. The smallest nudge of the mouse changes
 a number, dirties the file and ends up in a commit. Such diffs say nothing a reviewer can judge.
 
-Where is the layout kept, what does it record, and how do boxes find their place in it? This ADR replaces the
-Storage and Positions parts of ADR 0011, and the parts of it that depend on them. Layers, roles, shapes, folders
-standing in for packages, guessing layers, and scale are unchanged.
+Where is the layout kept, what does it record, how do boxes find their place in it, and is the folder view still
+needed? This ADR replaces the Storage and Positions parts of ADR 0011, its folder view, and the parts of it that
+depend on them. Layers, roles, shapes, folders standing in for packages, guessing layers, and scale are unchanged.
 
 ## Considered Options
 
@@ -37,10 +41,15 @@ File format:
 * TOML
 * YAML
 
+Views:
+
+* The folder view next to the three shapes of layers (ADR 0011)
+* Only the three shapes of layers
+
 ## Decision Outcome
 
 Chosen options: **a committed `.vugent.yaml` at the root of the reviewed folder**, **each layer as an ordered list
-of boxes**, and **YAML**.
+of boxes**, **YAML**, and **only the three shapes of layers**.
 
 * Committing the layout makes it the team's map. Changing it is a pull request that the architect approves, and git
   keeps its history.
@@ -53,6 +62,11 @@ of boxes**, and **YAML**.
 * YAML reads best as a file of ordered lists: no brackets or trailing commas, and one box per line. YAML's
   well-known traps, such as a folder named `false`, `no` or `2024` being read as something other than text, are
   avoided by always quoting paths and layer names (see Writing below).
+* A layer is a named group in an order, so nearly every architecture fits one of the shapes: layered and MVC as
+  bands, hexagonal, onion and clean architectures as rings, pipelines as left-right bands, a core with plugins as
+  rings. What the folder view still did, the layer views can do: with no layers placed, Unsorted ordered by path
+  reads much like the folder tree, and folders that aren't code, such as `docs` or `.github/workflows`, stay in
+  Unsorted or go into a layer the team adds for them. One view keeps one idea: the canvas is the architecture map.
 
 ### The file
 
@@ -89,7 +103,7 @@ layers:
 | Writing | Vugent always writes the file the same way: the keys in the order above, one box per line, two spaces of indent, no comments. Paths and layer names are always in double quotes, so a folder or layer named `false`, `no`, `null` or `2024` stays text. `shape` and `role` are fixed words and are not quoted. Saving a layout that hasn't changed leaves the file as it was, so it never shows a diff for nothing. |
 | Hand edits | Allowed. Comments and formatting are lost the next time vugent saves. When reading, a path or name that YAML parses as something other than text, such as an unquoted `false`, is an error that names the line, rather than being turned back into text, which might not give back what the user typed (`1.10` would come back as `1.1`). |
 | No file | Vugent uses the four layers of ADR 0011 and the rings shape, and writes nothing until the user changes something, so opening a repository never creates a file in it. |
-| Not readable | If the file can't be parsed, for example because it has merge conflict markers, the canvas shows the folder view with a warning naming the file and the error, and nothing can be dragged. Vugent never overwrites a file it couldn't read. |
+| Not readable | If the file can't be parsed, for example because it has merge conflict markers, the canvas shows every box in Unsorted with a warning naming the file and the error, and nothing can be dragged. Vugent never overwrites a file it couldn't read. |
 | Duplicates | A box listed twice, for example after a merge, stays in the first place it is listed. The next save removes the other. |
 | Missing boxes | A listed path that doesn't exist in the working tree is ignored while drawing and removed on the next save. Each branch carries its own file, so nothing is lost: switching branches brings back that branch's layout. |
 | Not listed | A box that isn't in any layer goes to Unsorted, unless a guess places it (ADR 0011). A guess is shown but not written, so a better guess later doesn't change the file. It is written once the user drops the box somewhere. |
@@ -105,10 +119,22 @@ layers:
   can't be dragged. None of their positions are saved. This may be revisited once there is feedback, or once classes
   exist.
 * Unsorted is ordered by path.
-* The folder view (ADR 0011) has no saved positions either. It is laid out automatically, as it is today.
 * A box can move without anyone dragging it: when a box before it in the same layer grows or shrinks, or a box is
   added or removed, the boxes after it slide along. Their order never changes, and order is what people remember:
   "store sits next to cache, in Storage".
+
+### No folder view
+
+The canvas always shows layers in the team's shape, with Unsorted beside them. There is no view of the nested folder
+tree and no switch between views; the only choice left on the canvas is the shape, which is saved in the file.
+
+The boxes are still folders for now. Every folder that holds files directly is one box, labeled with its path, with
+its files inside (ADR 0011). A language plugin (#8) replaces them with what the language has, such as Go or Java
+packages or Rust modules, with types and functions inside. The layers, the shapes and the file stay the same; only
+what a box stands for becomes more accurate.
+
+When no box is in a layer, as on a first visit before the folder-name guess (#48) exists, Unsorted holds every box
+and takes the whole canvas.
 
 ### Reading and saving
 
@@ -124,13 +150,16 @@ layers:
 
 ### Personal settings
 
-Which view is open (folders and files, or layers), the zoom, and which folders are collapsed are how one person
-looks at the map, not part of it. They are kept in the browser's local storage.
+The zoom and which boxes are collapsed are how one person looks at the map, not part of it. They are kept in the
+browser's local storage.
 
 ### Left for later
 
 * Showing a change to `.vugent.yaml` in the review as moved boxes ("3 boxes moved to Storage") rather than as a
   diff of the file.
+* Monorepos. Every service's packages share the same layers, so five services' storage packages end up in one
+  Storage ring. Services as the top level (#3) is the fix; the folder view only avoided the problem.
+* Feature slices, where features and layers form a grid. The shapes have one dimension, so the team picks one.
 * Moving a box to its new path when git detects a rename. Until then, renaming a package sends it to Unsorted, and
   the pull request that renames it should place it again.
 * An arrange mode that must be switched on before boxes can be dragged, to guard against accidental drags. Without
@@ -142,8 +171,13 @@ looks at the map, not part of it. They are kept in the browser's local storage.
 * Good, because the team shares one map, reviewed and approved like any other change, with its history in git.
 * Good, because diffs of the layout are short and readable, and a drag that changes nothing writes nothing.
 * Good, because the file lists only top-level boxes, so it stays small even for a service of 10,000 files.
+* Good, because there is one view and one layout to build and maintain, and the only control on the canvas, the
+  shape, is a team setting.
 * Good, because there are no pixel positions to keep stable, so there is no free-space search, no pushing of
   neighbours, and no need for Tidy or Reset. Reset is `git checkout .vugent.yaml`.
+* Bad, because the nested folder canvas of earlier releases is gone, and a repository with no layout starts as one
+  flat Unsorted area.
+* Bad, because monorepos mix their services' packages in the same layers until services become the top level.
 * Bad, because boxes can slide along their layer when a box before them changes size, so the map is stable in
   order but not in pixels.
 * Bad, because vugent adds a file to the user's repository once they arrange anything, and every rearrangement is
