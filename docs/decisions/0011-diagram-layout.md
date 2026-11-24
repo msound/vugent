@@ -52,8 +52,8 @@ Boxes vugent cannot place:
 ## Decision Outcome
 
 Chosen options: **the user decides, and vugent places only what the user has not**; **layers**; **the user's
-choice of the folder tree, rings or bands, rings by default**; **`.vugent/layout.json`, kept out of git**; and **an Unsorted
-area**.
+choice of the folder tree, rings or bands, rings by default**; ~~**`.vugent/layout.json`, kept out of git**~~ (superseded
+by [ADR 0012](0012-committed-layer-layout.md): a committed `.vugent.yaml`); and **an Unsorted area**.
 
 * The canvas should match the developer's mental model of their software, and only the developer has that model.
   Like furniture in their own home, they put boxes where they want them: one user wants `package.json` out of the
@@ -63,8 +63,9 @@ area**.
   tree. Layers also let a reviewer read a change in the order they choose.
 * Top-down, bottom-up and inside-out reviewing are all better than alphabetical order, and none of them is right
   for everyone. Vugent only gives the user spaces to park boxes in. It doesn't decide which box goes where.
-* The layout is personal. Committing it would make it a team decision, and every save would show up as an
-  uncommitted change in the review itself.
+* ~~The layout is personal. Committing it would make it a team decision, and every save would show up as an
+  uncommitted change in the review itself.~~ Superseded by [ADR 0012](0012-committed-layer-layout.md): the layout is the team's decision, so it is
+  committed and changed through pull requests.
 * Packages vugent can't place should be easy to see, so that the user places them. In a layer chosen by default,
   they would look as if vugent had placed them on purpose.
 
@@ -76,7 +77,7 @@ area**.
 | Views | Four icons switch between them: **folders and files**, today's canvas with no layers, where top-level boxes sit anywhere on the canvas; and three shapes of layers. |
 | Shapes | **Rings** (the default; the first layer is the innermost ring), **top-down bands** (the first layer on top) and **left-right bands** (the first layer on the left). |
 | Switching shape | Keeps the user's order of layers and draws the same boxes in the new shape. It doesn't reorder layers to suit the shape. |
-| Switching view | Boxes inside other boxes keep the same positions in every view, since what a box contains doesn't change. Only the top-level boxes are placed per view: at x and y in the folder view, in a layer in the others. The view is saved. |
+| Switching view | ~~Boxes inside other boxes keep the same positions in every view, since what a box contains doesn't change. Only the top-level boxes are placed per view: at x and y in the folder view, in a layer in the others. The view is saved.~~ Superseded by [ADR 0012](0012-committed-layer-layout.md): boxes inside other boxes are laid out automatically, the folder view is laid out automatically, and the view is a personal setting kept in the browser. |
 | Unsorted | An area beside the layers that holds every box that hasn't been placed in a layer. |
 | Labels | Each ring or band shows its layer's name. |
 | Size | A layer grows to hold the boxes in it. A ring's thickness and a band's depth fit its tallest stack of boxes. |
@@ -97,43 +98,47 @@ only folders, like `internal/` or `cmd/`, isn't drawn in the layer views. Its su
 The folder view keeps today's nested tree. Inside a folder, files keep the same positions in both views; in the
 layer views, the space a subfolder takes in the folder view is left as a gap.
 
-When a plugin arrives, each folder box becomes a real package box with the same saved place. This fits Rust badly,
+When a plugin arrives, each folder box becomes a real package box with the same place in its layer. This fits Rust badly,
 where a module is usually a file, such as `src/http.rs`, rather than a folder, and vugent's own code would be a
 single box. That is accepted for a stand-in, and the Rust plugin replaces it.
 
 ### Positions
 
+Superseded by [ADR 0012](0012-committed-layer-layout.md), except the first two bullets: a box is listed in its
+layer's ordered list of boxes, with no pixel positions, and boxes inside another box are laid out automatically and
+can't be dragged for now.
+
 * Only top-level boxes move between layers and Unsorted. Boxes inside them go with them.
-* A box inside another box can be dragged only within its own parent. Like a method that can't be pulled out of its
-  class, a box never leaves what contains it, so the canvas always shows the real structure. Folders and files are a
-  stand-in until packages and classes exist, and follow the same rule.
-* Boxes are keyed by their id: `d:` or `f:` followed by the path today, with packages and classes added later. Each
-  saved box records where it is:
-  * **A top-level box** records x and y for the folder view, and for the layer views its layer, or Unsorted, as a position along the layer, from 0 to 1, and a distance across it from the
-    layer's inner edge. In a band these are the distance along the band and the depth within it. In a ring they
-    are the angle and the distance out from the ring's inner edge. The same two numbers work for every shape, so
-    switching shape redraws the same arrangement. Boxes that overlap in the new shape are pushed apart as little as
-    possible, and the result is saved.
-  * **A box inside another** records x and y from its parent's top-left corner.
-* A box with a saved position **never moves on its own**.
-* A box without one is placed in free space inside its parent folder, or in Unsorted if it is at the top level. No
-  other box moves. Its position is then saved like any other.
-* A removed box leaves a gap. A folder that outgrows its space grows right and down, and pushes only the boxes it
-  would overlap, as little as possible.
-* The arrangement is the same for every review. A box keeps its place in every commit, the branch and the working
+* A box never leaves what contains it. Like a method that can't be pulled out of its class, the canvas always shows
+  the real structure. Folders and files are a stand-in until packages and classes exist, and follow the same rule.
+* ~~Boxes are keyed by their id: `d:` or `f:` followed by the path today, with packages and classes added later. Each
+  saved box records where it is:~~
+  * ~~**A top-level box** records x and y for the folder view, and for the layer views its layer, or Unsorted, as a
+    position along the layer, from 0 to 1, and a distance across it from the layer's inner edge. In a band these
+    are the distance along the band and the depth within it. In a ring they are the angle and the distance out from
+    the ring's inner edge. The same two numbers work for every shape, so switching shape redraws the same
+    arrangement. Boxes that overlap in the new shape are pushed apart as little as possible, and the result is
+    saved.~~
+  * ~~**A box inside another** records x and y from its parent's top-left corner.~~
+* ~~A box with a saved position **never moves on its own**.~~
+* ~~A box without one is placed in free space inside its parent folder, or in Unsorted if it is at the top level. No
+  other box moves. Its position is then saved like any other.~~
+* ~~A removed box leaves a gap. A folder that outgrows its space grows right and down, and pushes only the boxes it
+  would overlap, as little as possible.~~
+* ~~The arrangement is the same for every review. A box keeps its place in every commit, the branch and the working
   tree. A box that doesn't exist in the selected review isn't drawn, and its saved position is kept, so switching
-  branches and back restores it.
-* Nothing is packed again unless the user asks. **Tidy** packs one folder or layer from scratch, and **Reset**
-  throws the whole saved arrangement away.
+  branches and back restores it.~~
+* ~~Nothing is packed again unless the user asks. **Tidy** packs one folder or layer from scratch, and **Reset**
+  throws the whole saved arrangement away.~~
 
 ### Placing boxes automatically
 
-Vugent places a box only when it has no saved position.
+Vugent places a box only when it ~~has no saved position~~ isn't listed in a layer ([ADR 0012](0012-committed-layer-layout.md)).
 
 | Signal | Decision |
 |---|---|
 | Folder names | Until a language plugin covers a service, a folder box's name places it. The last part of its path, in any language: `handler`, `handlers`, `http`, `api`, `routes`, `controller` or `web` go into **Entry**; `service`, `services`, `usecase` or `app` into **Business**; `model`, `models`, `domain` or `entity` into **Model**; `store`, `storage`, `db`, `repository`, `repo`, `dao` or `persistence` into **Storage**. The list is kept in one place and grows as it is used. |
-| Inside a folder | ELK's rectangle packing lays out a folder the first time it is seen, and again on Tidy. After that, new boxes go into the first free space that fits them, found by vugent's own code, since ELK can't add boxes around ones that stay fixed. |
+| Inside a folder | ~~ELK's rectangle packing lays out a folder the first time it is seen, and again on Tidy. After that, new boxes go into the first free space that fits them, found by vugent's own code, since ELK can't add boxes around ones that stay fixed.~~ Superseded by [ADR 0012](0012-committed-layer-layout.md): a folder's contents are laid out automatically, the same way every time for the same contents. |
 | Known libraries | Each language plugin (#8) lists well-known libraries by role. A package that uses a database driver (MongoDB, PostgreSQL, MySQL, MariaDB and so on) goes into the **Storage** layer. A package that serves HTTP endpoints (in Go, `net/http`, gin, gorilla/mux and so on) goes into the **Entry** layer. |
 | The import graph | Places the packages in between. A package that imports nothing in the project but is imported by others goes into **Model**. One that sits between Entry and Storage packages goes into **Business**. |
 | Neither | The package goes into **Unsorted**. |
@@ -144,23 +149,27 @@ fingerprints and imports replace it for each language that gets a plugin.
 
 ### Storage
 
-* `.vugent/layout.json` lives in the reviewed folder. It holds a format version, the shape, the layers with their
+Superseded by [ADR 0012](0012-committed-layer-layout.md): the layout is a committed `.vugent.yaml` at the root of
+the reviewed folder, read from the working tree for every review, and changes to it are `files` events like any
+other file.
+
+* ~~`.vugent/layout.json` lives in the reviewed folder. It holds a format version, the shape, the layers with their
   names and roles, and every saved position. Next to it is a `.vugent/.gitignore` containing `*`, so the folder is
-  never committed: the arrangement is per user and isn't shared with the team.
-* The server reads and writes the file with `GET` and `PUT /api/layout`, and the browser saves after every change.
-  If two browsers save, the last save wins.
-* The watcher skips gitignored paths (ADR 0008), so saving the layout never sends a `files` event and never shows
-  up in a review.
-* Positions of boxes that no longer exist are kept, which is cheap, until Reset.
-* The caching ADR (#7) may store vugent's other files in `.vugent/` as well, or pick another place.
+  never committed: the arrangement is per user and isn't shared with the team.~~
+* ~~The server reads and writes the file with `GET` and `PUT /api/layout`, and the browser saves after every change.
+  If two browsers save, the last save wins.~~
+* ~~The watcher skips gitignored paths (ADR 0008), so saving the layout never sends a `files` event and never shows
+  up in a review.~~
+* ~~Positions of boxes that no longer exist are kept, which is cheap, until Reset.~~
+* ~~The caching ADR (#7) may store vugent's other files in `.vugent/` as well, or pick another place.~~
 
 ### Scale
 
 * The target is about 10,000 files.
-* A folder with nothing changed inside it in the selected review is collapsed: it keeps its saved slot and size,
+* A folder with nothing changed inside it in the selected review is collapsed: it keeps its slot and size,
   but its contents are neither laid out nor drawn until the user opens it. Collapsing never moves a box.
-* Layout keeps running in a Web Worker (ADR 0001). Boxes with saved positions need no layout, so after the first
-  visit only new boxes are placed, and a live update costs little however large the service.
+* Layout keeps running in a Web Worker (ADR 0001). ~~Boxes with saved positions need no layout, so after the first
+  visit only new boxes are placed, and a live update costs little however large the service.~~
 * Svelte Flow skips boxes that are off screen. ADR 0003's warning stands: monorepos far beyond this target may need
   that choice revisited.
 
@@ -168,16 +177,16 @@ fingerprints and imports replace it for each language that gets a plugin.
 
 * Drawing edges between boxes, and how they combine and split across zoom levels. Edges don't affect where boxes
   are placed.
-* Moving a box's saved position to its new path when git detects a rename. Until then, a renamed file is a new box
-  placed in free space.
+* Moving a box's saved position to its new path when git detects a rename. ~~Until then, a renamed file is a new box
+  placed in free space.~~ Carried over to [ADR 0012](0012-committed-layer-layout.md).
 * Services as the top level, which depends on service detection (#3).
 
 ### Implementation
 
 | Issue | Story |
 |---|---|
-| #42 | Save the canvas layout in `.vugent/layout.json`, keep boxes in place across live updates and reviews, Tidy and Reset |
-| #43 | Drag and drop boxes: top-level boxes between layers, the rest within their parent |
+| #42 | ~~Save the canvas layout in `.vugent/layout.json`, keep boxes in place across live updates and reviews, Tidy and Reset~~ Read and save the committed `.vugent.yaml` ([ADR 0012](0012-committed-layer-layout.md)) |
+| #43 | ~~Drag and drop boxes: top-level boxes between layers, the rest within their parent~~ Drag top-level boxes into a slot in a layer or Unsorted ([ADR 0012](0012-committed-layer-layout.md)) |
 | #44 | Layers shown as rings or bands, folders as package stand-ins, the folder view, and the Unsorted area |
 | #45 | Add, rename and reorder layers |
 | #48 | Guess layers from folder names |
@@ -189,15 +198,17 @@ fingerprints and imports replace it for each language that gets a plugin.
 * Good, because boxes never leave their parent, so the map always shows the real structure of the software.
 * Good, because the canvas becomes the user's own map of their software. A focused commit lights up one area, and
   moving between commits keeps every box where the user put it.
-* Good, because boxes never jump while an agent works. New boxes find free space, and removed ones leave gaps.
+* ~~Good, because boxes never jump while an agent works. New boxes find free space, and removed ones leave gaps.~~
 * Good, because reviewers can read top-down, bottom-up or inside-out, in the shape they think in.
-* Good, because live updates and large services stay cheap: saved boxes need no layout, and unchanged folders
+* Good, because live updates and large services stay cheap: ~~saved boxes need no layout, and~~ unchanged folders
   stay collapsed.
 * Good, because the feature is useful today with folders, and becomes more useful with each language plugin.
 * Bad, because without a plugin the first view is only as good as the folder names. A service whose folders aren't
   named by layer starts with everything in Unsorted, and the arrangement is up to the user.
 * Bad, because folders are a poor stand-in for packages in languages such as Rust, where modules are files, until
   their plugins exist.
-* Bad, because the layout isn't shared, so two teammates' maps of the same service differ, and a fresh clone
-  starts over.
-* Bad, because over time, gaps and growth can leave the canvas untidy until the user asks for Tidy.
+* ~~Bad, because the layout isn't shared, so two teammates' maps of the same service differ, and a fresh clone
+  starts over.~~
+* ~~Bad, because over time, gaps and growth can leave the canvas untidy until the user asks for Tidy.~~
+
+See [ADR 0012](0012-committed-layer-layout.md) for the consequences of committing the layout.
